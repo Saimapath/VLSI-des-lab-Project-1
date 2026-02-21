@@ -1,0 +1,37 @@
+// --- 1. TEST LUI & AUIPC ---
+// LUI x1, 0x12345 (Result: x1 = 0x12345000)
+123450b7 
+// AUIPC x2, 0x10000 (Result: x2 = PC + 0x10000000). 
+// PC is 4, so x2 = 0x10000004
+10000117 
+
+// --- 2. SETUP BASE ADDRESS ---
+// x3 = 0x40 (64)
+04000193 
+
+// --- 3. TEST WORD (SW / LW) ---
+// Store x1 (0x12345000) to Mem[64]
+0011a023 
+// Load it back to x4. Should be 0x12345000.
+0001a203 
+
+// --- 4. TEST HALF-WORD (SH / LH / LHU) ---
+// Reset x5 to 0xABCDEF88 (Negative 16-bit 0xa88)
+a8800293 
+// Store Half (0xF88) to Mem[68] (offset 4)
+00519223 
+// Load Half Signed to x6 (Expect 0xFFFFF88)
+00419303 
+// Load Half Unsigned to x7 (Expect 0x0000F88)
+0041d383 
+
+// --- 5. TEST BYTE (SB / LB / LBU) ---
+// Store Byte (0x88) to Mem[72] (offset 8)
+00518423 
+// Load Byte Signed to x8 (Expect 0xFFFFFF88)
+00818403 
+// Load Byte Unsigned to x9 (Expect 0x00000088)
+0081c483 
+
+// --- 6. STOP ---
+00000063

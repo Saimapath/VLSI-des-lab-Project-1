@@ -1,0 +1,55 @@
+// --- INIT ---
+00f00093 // 1.  addi x1, x0, 15    (x1 = 15)
+00500113 // 2.  addi x2, x0, 5     (x2 = 5)
+fff00193 // 3.  addi x3, x0, -1    (x3 = -1 / 0xFFFFFFFF)
+
+// --- CRITICAL SLT/SLTU TESTS ---
+0011a233 // 4.  slt  x4, x3, x1    (Signed -1 < 15: YES -> 1)
+0011b2b3 // 5.  sltu x5, x3, x1    (Unsigned Max < 15: NO -> 0)
+00112333 // 6.  slt  x6, x2, x1    (Signed 5 < 15: YES -> 1)
+001133b3 // 7.  sltu x7, x2, x1    (Unsigned 5 < 15: YES -> 1)
+
+// --- ALU OPS ---
+00208433 // 8.  add  x8, x1, x2    (20)
+402084b3 // 9.  sub  x9, x1, x2    (10)
+0020c533 // 10. xor  x10, x1, x2   (10)
+0020e5b3 // 11. or   x11, x1, x2   (15)
+0020f633 // 12. and  x12, x1, x2   (5)
+002096b3 // 13. sll  x13, x1, x2   (480)
+0020d733 // 14. srl  x14, x1, x2   (0)
+4021d7b3 // 15. sra  x15, x3, x2   (-1)
+
+// --- BRANCH TESTS (New) ---
+// If branch works, we skip the "Error Trap" (addi x30...).
+// If branch fails, we execute x30 = Error Code.
+
+// 16. BEQ (Taken: 15 == 15) -> Skip to 18
+00108463 // beq  x1, x1, +8
+00100f13 // addi x30, x0, 1        (ERROR: BEQ Failed)
+
+// 18. BNE (Taken: 15 != 5) -> Skip to 20
+00209463 // bne  x1, x2, +8
+00200f13 // addi x30, x0, 2        (ERROR: BNE Failed)
+
+// 20. BLT (Taken: -1 < 15 Signed) -> Skip to 22
+0011c463 // blt  x3, x1, +8
+00300f13 // addi x30, x0, 3        (ERROR: BLT Failed)
+
+// 22. BGE (Taken: 15 >= -1 Signed) -> Skip to 24
+0030d463 // bge  x1, x3, +8
+00400f13 // addi x30, x0, 4        (ERROR: BGE Failed)
+
+// 24. BLTU (Taken: 15 < Max Unsigned) -> Skip to 26
+0030e463 // bltu x1, x3, +8
+00500f13 // addi x30, x0, 5        (ERROR: BLTU Failed)
+
+// 26. BGEU (Taken: Max >= 15 Unsigned) -> Skip to 28
+0011f463 // bgeu x3, x1, +8
+00600f13 // addi x30, x0, 6        (ERROR: BGEU Failed)
+
+// 28. BEQ (Not Taken: 15 != 5) -> Fall through to 29
+00208663 // beq  x1, x2, +12       (Target is Stop)
+0aa00813 // 29. addi x16, x0, 0xAA (SUCCESS Checkpoint)
+
+// --- STOP ---
+00000063 // 30. beq x0, x0, 0
