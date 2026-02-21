@@ -67,7 +67,7 @@ module control_unit (
                 case (op)
                     7'b0000011, 7'b0100011: next_state = S2_MEMADR;
                     7'b0110011:             next_state = S6_EXECUTER;
-                    7'b0010011:             next_state = S8_EXECUTEI;
+                    7'b0010011,7'b1100111:  next_state = S8_EXECUTEI;
                     7'b1101111:             next_state = S9_JAL;
                     7'b1100011:             next_state = S10_BEQ;
                     7'b0110111:             next_state = S0_FETCH; // LUI
@@ -123,7 +123,7 @@ module control_unit (
                 ALUSrcA = 2'b10;
                 ALUSrcB = 2'b01;
                 ALUOp = 2'b10;
-                next_state = S7_ALUWB;
+                next_state = (op==7'b1100111) ? S9_JAL : S7_ALUWB;
             end
 
             S7_ALUWB: begin
