@@ -3,17 +3,19 @@ module riscv_soc(
     input reset
 );
     // Interconnect wires
-    wire [31:0] PCF, InstrF, ALUResultM, WriteDataM, ReadDataM;
+    wire [31:0] PCF, ImemOut, ALUResultM, WriteDataM, ReadDataM;
     wire [3:0]  MemWriteM;
     wire        MemEnM;
+    wire       iMemEnF;
 
     // Processor Instance
     riscv_pipelined cpu (
         .clk(clk),
         .reset(reset),
         .PCF(PCF),
-        .InstrF(InstrF),
+        .ImemOut(ImemOut),
         .MemWriteM(MemWriteM),
+        .iMemEnF(iMemEnF),
         .MemEnM(MemEnM),
         .ALUResultM(ALUResultM),
         .WriteDataM(WriteDataM),
@@ -24,7 +26,8 @@ module riscv_soc(
     bram_imem imem (
         .clk(clk),
         .addr(PCF),
-        .dout(InstrF)
+        .dout(ImemOut),
+        .en(iMemEnF) // Enable signal from CPU
     );
 
     // Data Memory (BRAM Style)

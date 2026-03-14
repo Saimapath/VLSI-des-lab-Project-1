@@ -19,6 +19,7 @@ echo 2) Test Register File
 echo 3) Test Controller
 echo 4) Test Hazard Unit
 echo 5) Test Full SoC (Top Level)
+echo 6) Torture Test for rv32i
 echo q) Quit
 echo ------------------------------------------------
 set /p choice="Choose a module to verify: "
@@ -38,6 +39,9 @@ if "%choice%"=="1" (
 ) else if "%choice%"=="5" (
     set MODULE=soc
     set TB_FILE=%TEST_DIR%\soc_tb.sv
+) else if "%choice%"=="6" (
+    set MODULE=torture_test
+    set TB_FILE=%TEST_DIR%\rv32i_base_torture_tb.sv
 ) else if "%choice%"=="q" (
     exit /b
 ) else (

@@ -1,6 +1,9 @@
+
 module hazard_unit(
     input  [4:0] rs1d, rs2d, rs1e, rs2e, rde, rdm, rdw,
-    input        regwritem, regwritew, resultsrce0, pcsrc_e,
+    input        regwritem, regwritew, pcsrc_e,
+    input  [1:0] resultsrce,
+    input        valide, validm, validw,
     output reg [1:0] forwardae, forwardbe,
     output       stallf, stalld, flushe, flushd
 );
@@ -8,22 +11,25 @@ module hazard_unit(
     // Forwarding handles Data Hazards (RAW) by bypassing values from MEM or WB
     always @(*) begin
         // Forward A (rs1)
-        if (((rs1e == rdm) && regwritem) && (rs1e != 0))      forwardae = 2'b10; // Forward from Memory Stage
-        else if (((rs1e == rdw) && regwritew) && (rs1e != 0)) forwardae = 2'b01; // Forward from Writeback Stage
+        if (validm && ((rs1e == rdm) && regwritem) && (rs1e != 0)) forwardae = 2'b10; 
+        else if (validw && ((rs1e == rdw) && regwritew) && (rs1e != 0)) forwardae = 2'b01; 
         else                                                  forwardae = 2'b00; // No forwarding
-
-        // Forward B (rs2)
-        if (((rs2e == rdm) && regwritem) && (rs2e != 0))      forwardbe = 2'b10;
-        else if (((rs2e == rdw) && regwritew) && (rs2e != 0)) forwardbe = 2'b01;
-        else                                                  forwardbe = 2'b00;
+  // Forward B (rs2)
+        if (validm && ((rs2e == rdm) && regwritem) && (rs2e != 0))      
+            forwardbe = 2'b10;
+        else if (validw && ((rs2e == rdw) && regwritew) && (rs2e != 0)) 
+            forwardbe = 2'b01;
+        else                                                  
+            forwardbe = 2'b00;
     end
 
     // --- Stall and Flush Logic ---
     // Handles Load-Use hazards and Control hazards (Branching)
-    wire lwstall = resultsrce0 && ((rs1d == rde) || (rs2d == rde));
+    // wire lwstall = resultsrce0 && ((rs1d == rde) || (rs2d == rde));
+    wire lwstall = valide && (resultsrce == 2'b01) && (rde != 5'd0) && ((rs1d == rde) || (rs2d == rde));
     
     assign stallf = lwstall;               // Freeze PC
     assign stalld = lwstall;               // Freeze Decode
-    assign flushd = pcsrc_e;               // Flush Decode on branch
-    assign flushe = lwstall || pcsrc_e;    // Flush Execute on branch or load-stall
+    assign flushd = pcsrc_e ;               // Flush Decode on branch
+    assign flushe =  pcsrc_e || lwstall;    // Flush Execute on branch or load-stall4
 endmodule

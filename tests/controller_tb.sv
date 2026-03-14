@@ -71,7 +71,7 @@ module controller_tb;
     initial begin
         $display("--- Starting Named Constant Controller Test ---");
 
-        // Format: Name, Opcode, f3, f7, RegW, MemW, Jump, Branch, ALUSrc, ResultSrc, ALUControl
+//       check("Name", Opcode, f3, f7, RegWrite, MemWrite, Jump, Branch, ALUSrc, ResultSrc, ALUControl)
         
         // R-TYPE
         check("ADD",  OP_R_TYPE, 3'b000, LOW,  HIGH, LOW,  LOW,  LOW,  LOW,  RES_ALU, ALU_ADD);

@@ -5,7 +5,7 @@ module controller(
     input        funct7b5,
     output reg   regwrite, 
     output reg [3:0]   memwrite, 
-    output reg   jump, branch, alusrc,
+    output reg   jump, branch,zero_for_taken, alusrc,
     output reg [1:0] resultsrc,
     output reg [2:0] immsrc, // Updated to 3 bits for more immediate types
     output reg [3:0] alucontrol,
@@ -39,26 +39,44 @@ module controller(
     // RegWrite Decoder
     always @(*) begin
         case(op)
-            OP_LW, OP_R_TYPE, OP_I_ALU, OP_JAL, OP_FP_R_TYPE, OP_FLW: regwrite = 1'b1;
+            OP_LW, OP_R_TYPE, OP_I_ALU, OP_JAL, OP_JALR, OP_FP_R_TYPE, OP_FLW, OP_LUI, OP_AUIPC: regwrite = 1'b1;
             default: regwrite = 1'b0;
         endcase
     end
 
-    // MemWrite Decoder
+// MemWrite Decoder (Handles sb, sh, sw)
     always @(*) begin
-        case(op)
-            OP_SW, OP_FSW: memwrite = 1'b1;
-            default:       memwrite = 1'b0;
-        endcase
+        if (op == OP_SW || op == OP_FSW) begin
+            case (funct3)
+                3'b000: memwrite = 4'b0001; // sb: Store Byte (1 byte)
+                3'b001: memwrite = 4'b0011; // sh: Store Half (2 bytes)
+                3'b010: memwrite = 4'b1111; // sw: Store Word (4 bytes)
+                default: memwrite = 4'b0000;
+            endcase
+        end else begin
+            memwrite = 4'b0000;
+        end
     end
 
     // Branch Decoder
     always @(*) begin
         case(op)
-            OP_BEQ:  branch = 1'b1;
-            default: branch = 1'b0;
+            OP_BEQ: begin
+                 branch = 1'b1;
+                 case(funct3)
+                    3'b000,3'b101,3'b111: zero_for_taken=1'b1;
+                    3'b001,3'b100,3'b110: zero_for_taken=1'b0;
+                    default: zero_for_taken=1'b0;
+                 endcase
+               
+            end
+            default: begin 
+                branch = 1'b0;
+                zero_for_taken=1'b0;
+            end
         endcase
     end
+
 
     // Jump Decoder
     always @(*) begin
@@ -71,7 +89,7 @@ module controller(
     // ALUSrc Decoder
     always @(*) begin
         case(op)
-            OP_LW, OP_SW, OP_I_ALU, OP_FLW, OP_FSW: alusrc = 1'b1;
+            OP_LW, OP_SW, OP_I_ALU, OP_FLW, OP_FSW,OP_JALR: alusrc = 1'b1;
             default: alusrc = 1'b0;
         endcase
     end
@@ -79,10 +97,10 @@ module controller(
     // ImmSrc Decoder
     always @(*) begin
         case(op)
-            OP_LW, OP_I_ALU, OP_FLW: immsrc = 3'b000; // I-type
+            OP_LW, OP_I_ALU, OP_FLW,OP_JALR: immsrc = 3'b000; // I-type
             OP_SW, OP_FSW:           immsrc = 3'b001; // S-type
             OP_BEQ:                  immsrc = 3'b010; // B-type
-            OP_JAL, OP_JALR:         immsrc = 3'b011; // J-type
+            OP_JAL:         immsrc = 3'b011; // J-type
             OP_LUI, OP_AUIPC:        immsrc = 3'b100; // I-type (LUI and AUIPC use imm[31:12] << 12)
             default:                 immsrc = 3'b000;
         endcase
@@ -93,7 +111,7 @@ module controller(
         case(op)
             OP_LW, OP_FLW: resultsrc = 2'b01; // Data Mem
             OP_JAL, OP_JALR:        resultsrc = 2'b10; // PC + 4
-            OP_LUI:        resultsrc = 2'b11; // Immediate (for LUI/AUIPC)
+            OP_LUI, OP_AUIPC:        resultsrc = 2'b11; // Immediate (for LUI/AUIPC)
             default:       resultsrc = 2'b00; // ALU Result
         endcase
     end

@@ -8,4 +8,5 @@ module pipe_reg #(parameter WIDTH = 32) (
         if (reset)      q <= 0;
         else if (clr)   q <= 0;
         else if (en)    q <= d;
+        // else q <= d;
 endmodule
