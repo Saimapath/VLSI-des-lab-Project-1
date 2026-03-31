@@ -39,7 +39,7 @@ module controller(
     // RegWrite Decoder
     always @(*) begin
         case(op)
-            OP_LW, OP_R_TYPE, OP_I_ALU, OP_JAL, OP_JALR, OP_FP_R_TYPE, OP_FLW, OP_LUI, OP_AUIPC: regwrite = 1'b1;
+            OP_LW, OP_R_TYPE, OP_I_ALU, OP_JAL, OP_JALR, OP_LUI, OP_AUIPC: regwrite = 1'b1;
             default: regwrite = 1'b0;
         endcase
     end
