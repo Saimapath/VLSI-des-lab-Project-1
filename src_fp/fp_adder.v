@@ -6,148 +6,133 @@ module fp_adder_sub (
     output wire [15:0] result
 );
 
-wire [4:0] a_exponent, b_exponent;
-wire [10:0] a_mantissa, b_mantissa, o_mantissa;
-wire [14:0]  sum_mantissa, diff_mantissa;
-wire a_sign, b_sign;
-reg o_sign;
+    // =======================================================================
+    // OPTIMIZATION 1 & 2: Integer Compare and Early Swap
+    // =======================================================================
+    // Fast magnitude compare (ignores sign bit)
+    wire a_is_larger = (a[14:0] >= b[14:0]);
 
-assign a_exponent = a[14:10];
-assign b_exponent = b[14:10];
-assign a_mantissa = (a_exponent == 0) ? {1'b0, a[9:0]} : {1'b1, a[9:0]};
-assign b_mantissa = (b_exponent == 0) ? {1'b0, b[9:0]} : {1'b1, b[9:0]};
-assign a_sign = a[15];
-assign b_sign = b[15];
+    // Route to Larger (L) and Smaller (S)
+    wire [14:0] L_abs = a_is_larger ? a[14:0] : b[14:0];
+    wire [14:0] S_abs = a_is_larger ? b[14:0] : a[14:0];
+    wire L_sign       = a_is_larger ? a[15]   : b[15];
+    wire S_sign       = a_is_larger ? b[15]   : a[15];
 
-wire a_is_larger = {a_exponent, a_mantissa} >= {b_exponent, b_mantissa};
-wire [4:0] o_exponent = a_is_larger ? a_exponent : b_exponent;  
-wire [4:0] diff_exponent = a_is_larger ? (a_exponent - b_exponent) : (b_exponent - a_exponent);
+    wire [4:0] L_exp = L_abs[14:10];
+    wire [4:0] S_exp = S_abs[14:10];
 
-wire [10:0] smaller_mantissa = a_is_larger ? b_mantissa : a_mantissa;
-wire [10:0] larger_mantissa  = a_is_larger ? a_mantissa : b_mantissa;
+    // Inject hidden bits ONLY once they are sorted
+    wire [10:0] L_mant = (L_exp == 0) ? {1'b0, L_abs[9:0]} : {1'b1, L_abs[9:0]};
+    wire [10:0] S_mant = (S_exp == 0) ? {1'b0, S_abs[9:0]} : {1'b1, S_abs[9:0]};
 
-wire [41:0] extended_shift = {smaller_mantissa, 31'b0} >> diff_exponent;
+    // =======================================================================
+    // OPTIMIZATION 3 & 4: Single Subtractor and Sign Collapse
+    // =======================================================================
+    // Since L >= S, this is ALWAYS positive. No 2nd subtractor needed!
+    wire [4:0] diff_exponent = L_exp - S_exp;
 
-wire [10:0] shifted_main = extended_shift[41:31];
-wire G = extended_shift[30];
-wire R = extended_shift[29];
-wire S = |extended_shift[28:0]; // Sticky is the logical OR of ALL remaining bits
+    // Output sign mathematically reduced to a single mux
+    wire o_sign = (add_sub == 0) ? L_sign : (a_is_larger ? a[15] : ~b[15]);
 
-// Construct the 14-bit operands (11 main bits + 3 GRS bits)
-wire [13:0] shifted_mantissa_grs = {shifted_main, G, R, S};
-wire [13:0] other_mantissa_grs   = {larger_mantissa, 3'b000}; // Unshifted gets 000
+    wire signs_match = (L_sign == S_sign);
+    wire do_subtract = (add_sub == 0) ? !signs_match : signs_match;
 
-reg [14:0] add_sub_mantissa;
+    // =======================================================================
+    // ALIGNMENT SHIFTER (Clamped to 15)
+    // =======================================================================
+    wire [3:0] shift_amt = (diff_exponent > 5'd14) ? 4'd15 : diff_exponent[3:0];
 
-always @(*) begin
-    if (add_sub == 0) begin // Addition
-        if (a_sign == b_sign) begin
-           o_sign = a_sign; // same sign, result has that sign
-           add_sub_mantissa = other_mantissa_grs + shifted_mantissa_grs; // add mant     
-            // Perform addition of mantissas
-        end else begin
-            add_sub_mantissa = other_mantissa_grs - shifted_mantissa_grs; 
-            o_sign = a_is_larger ? a_sign : b_sign; // sign of larger
-            // Perform subtraction of mantissas
-        end
-    end else begin // Subtraction
-        if (a_sign != b_sign) begin
-              o_sign = a_sign; // different signs, result has sign of a
-                add_sub_mantissa = other_mantissa_grs + shifted_mantissa_grs; // add mant
-            // Perform addition of mantissas
-        end else begin
-            add_sub_mantissa = other_mantissa_grs - shifted_mantissa_grs; // subtract smaller from larger
-            o_sign = a_is_larger ? a_sign : ~b_sign; // if same sign, sign of larger, but if we are doing subtraction,
-            //  we flip the sign of b, so if a and b have same sign, we want the result to have the opposite sign
-             
-            // Perform subtraction of mantissas
-        end
-    end
-end
+    wire [25:0] extended_shift = {S_mant, 15'b0} >> shift_amt;
 
-// =======================================================================
-    // STAGE 4: NORMALIZATION (Leading Zero Counter & Shifter)
+    wire [10:0] shifted_main = extended_shift[25:15];
+    wire G = extended_shift[14];
+    wire R = extended_shift[13];
+    wire S = (|extended_shift[12:0]) | (diff_exponent > 5'd14); 
+
+    wire [13:0] S_mant_grs = {shifted_main, G, R, S};
+    wire [13:0] L_mant_grs = {L_mant, 3'b000}; 
+
+    // =======================================================================
+    // THE SINGLE ALU
+    // =======================================================================
+    wire [13:0] b_operand = do_subtract ? ~S_mant_grs : S_mant_grs;
+    wire [14:0] raw_add_result = L_mant_grs + b_operand + {14'd0, do_subtract};
+
+    wire [14:0] add_sub_mantissa = do_subtract ? {1'b0, raw_add_result[13:0]} : raw_add_result;
+
+    // =======================================================================
+    // NORMALIZATION (Parallel LZC)
     // =======================================================================
     reg [3:0]  lzc;
-    reg [13:0] norm_mant;
-    reg [4:0]  norm_exp;
-    wire       is_zero;
-
-    // Leading Zero Counter
     always @(*) begin
-        if      (add_sub_mantissa[14]) lzc = 4'd0;  // Carry out
-        else if (add_sub_mantissa[13]) lzc = 4'd0;  // Already normalized
-        else if (add_sub_mantissa[12]) lzc = 4'd1;
-        else if (add_sub_mantissa[11]) lzc = 4'd2;
-        else if (add_sub_mantissa[10]) lzc = 4'd3;
-        else if (add_sub_mantissa[9])  lzc = 4'd4;
-        else if (add_sub_mantissa[8])  lzc = 4'd5;
-        else if (add_sub_mantissa[7])  lzc = 4'd6;
-        else if (add_sub_mantissa[6])  lzc = 4'd7;
-        else if (add_sub_mantissa[5])  lzc = 4'd8;
-        else if (add_sub_mantissa[4])  lzc = 4'd9;
-        else if (add_sub_mantissa[3])  lzc = 4'd10;
-        else if (add_sub_mantissa[2])  lzc = 4'd11;
-        else if (add_sub_mantissa[1])  lzc = 4'd12;
-        else                           lzc = 4'd15; // Completely zero
+        casez (add_sub_mantissa)
+            15'b1_????_????_????_??: lzc = 4'd0;  
+            15'b0_1???_????_????_??: lzc = 4'd0;  
+            15'b0_01??_????_????_??: lzc = 4'd1;
+            15'b0_001?_????_????_??: lzc = 4'd2;
+            15'b0_0001_????_????_??: lzc = 4'd3;
+            15'b0_0000_1???_????_??: lzc = 4'd4;
+            15'b0_0000_01??_????_??: lzc = 4'd5;
+            15'b0_0000_001?_????_??: lzc = 4'd6;
+            15'b0_0000_0001_????_??: lzc = 4'd7;
+            15'b0_0000_0000_1???_??: lzc = 4'd8;
+            15'b0_0000_0000_01??_??: lzc = 4'd9;
+            15'b0_0000_0000_001?_??: lzc = 4'd10;
+            15'b0_0000_0000_0001_??: lzc = 4'd11;
+            15'b0_0000_0000_0000_1?: lzc = 4'd12;
+            default:                 lzc = 4'd15; 
+        endcase
     end
 
-    assign is_zero = (add_sub_mantissa == 15'd0) || (lzc == 4'd15);
+    // Redundancy deletion: If LZC is 15, the mantissa is entirely zero.
+    wire is_zero = (lzc == 4'd15);
+    
+    reg [13:0] norm_mant;
+    reg [4:0]  norm_exp;
 
-    // Barrel Shifter for Normalization
     always @(*) begin
         if (is_zero) begin
             norm_mant = 14'd0;
             norm_exp  = 5'd0;
-        end else if (add_sub_mantissa[14] == 1'b1) begin
-            // Addition Overflow: Shift Right by 1
-            // Sticky bit absorbs the old Round bit
+        end else if (!do_subtract && add_sub_mantissa[14] == 1'b1) begin
             norm_mant = {add_sub_mantissa[14:2], add_sub_mantissa[1] | add_sub_mantissa[0]};
-            norm_exp  = o_exponent + 5'd1;
+            norm_exp  = L_exp + 5'd1;
         end else begin
-            // Subtraction Cancellation: Shift Left by LZC
-            reg [14:0] shifted_temp;
-            shifted_temp = add_sub_mantissa << lzc;
-            norm_mant = shifted_temp[13:0]; 
-            norm_exp  = o_exponent - {1'b0, lzc};
+            norm_mant = (add_sub_mantissa[13:0] << lzc);
+            norm_exp  = L_exp - {1'b0, lzc};
         end
     end 
 
     // =======================================================================
-    // STAGE 5: ROUNDING
+    // ROUNDING & PACKING
     // =======================================================================
     wire norm_L = norm_mant[3];
     wire norm_G = norm_mant[2];
     wire norm_R = norm_mant[1];
-    wire norm_S = norm_mant[0];
+    wire norm_Sticky = norm_mant[0];
     
     reg round_up;
-
-    // RISC-V Rounding Modes
     always @(*) begin
         case (rm)
-            3'b000: round_up = (norm_G & (norm_R | norm_S)) | (norm_G & ~norm_R & ~norm_S & norm_L); // RNE
-            3'b001: round_up = 1'b0; // RTZ
-            3'b010: round_up = o_sign & (norm_G | norm_R | norm_S); // RDN
-            3'b011: round_up = ~o_sign & (norm_G | norm_R | norm_S); // RUP
-            3'b100: round_up = norm_G; // RMM
+            3'b000: round_up = (norm_G & (norm_R | norm_Sticky)) | (norm_G & ~norm_R & ~norm_Sticky & norm_L); 
+            3'b001: round_up = 1'b0; 
+            3'b010: round_up = o_sign & (norm_G | norm_R | norm_Sticky); 
+            3'b011: round_up = ~o_sign & (norm_G | norm_R | norm_Sticky); 
+            3'b100: round_up = norm_G; 
             default: round_up = 1'b0;
         endcase
     end
 
-    // Add round bit to fraction (12 bits to catch post-rounding overflow)
     wire [11:0] rounded_frac = {1'b0, norm_mant[13:3]} + round_up;
 
     reg [9:0] final_frac;
     reg [4:0] final_exp;
 
-    // Post-Rounding Overflow Check
     always @(*) begin
         if (is_zero) begin
             final_frac = 10'd0;
             final_exp  = 5'd0;
         end else if (rounded_frac[11] == 1'b1) begin
-            // Post-rounding overflow (e.g., 1.1111 rounded up to 10.0000)
             final_frac = 10'd0; 
             final_exp  = norm_exp + 5'd1;
         end else begin
@@ -156,9 +141,6 @@ end
         end
     end
 
-    // =======================================================================
-    // FINAL OUTPUT PACKING
-    // =======================================================================
     assign result = {o_sign, final_exp, final_frac};
 
 endmodule

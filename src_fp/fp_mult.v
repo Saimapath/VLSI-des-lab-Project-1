@@ -13,58 +13,38 @@ module fp16_multiplier (
     wire [4:0] a_exp = a[14:10];
     wire [4:0] b_exp = b[14:10];
     
-    // Check for zero inputs (if exponent is 0, we treat it as 0.0)
     wire a_is_zero = (a_exp == 5'd0);
     wire b_is_zero = (b_exp == 5'd0);
     wire result_is_zero = a_is_zero | b_is_zero;
 
-    // Extract mantissas and append the hidden '1'
     wire [10:0] a_mant = a_is_zero ? 11'd0 : {1'b1, a[9:0]};
     wire [10:0] b_mant = b_is_zero ? 11'd0 : {1'b1, b[9:0]};
+    wire o_sign = a_sign ^ b_sign;
 
     // =======================================================================
     // STAGE 2: MULTIPLY & ADD EXPONENTS
     // =======================================================================
-    wire o_sign = a_sign ^ b_sign;
-    
     // 11-bit x 11-bit multiplication yields a 22-bit product
-    // Vivado will map this directly to a DSP48E1 slice
     wire [21:0] raw_product = a_mant * b_mant; 
     
-    // Exponent calculation: Exp_A + Exp_B - Bias (15)
-    // We use a 7-bit signed wire to easily catch underflow (< 0) or overflow (> 31)
+    // Exponent math happens in parallel with multiplication
     wire signed [6:0] raw_exp = {2'b00, a_exp} + {2'b00, b_exp} - 7'sd15;
 
     // =======================================================================
-    // STAGE 3: NORMALIZE (Shift & Extract GRS)
+    // STAGE 3: NORMALIZE (Flattened Muxing & Sticky Reuse)
     // =======================================================================
-    // Since we multiply two normalized numbers (1.x * 1.y), the result can ONLY 
-    // be in the range [1.0, 3.99]. This means the hidden '1' is either at bit 20 or 21.
-    // We do NOT need a complex Leading Zero Counter!
-    
-    reg [9:0] norm_frac;
-    reg signed [6:0] norm_exp;
-    reg G, R, S;
+    wire is_norm = raw_product[21]; // Do we need to shift right?
 
-    always @(*) begin
-        if (raw_product[21] == 1'b1) begin
-            // Result is >= 2.0 (e.g., 10.xxxx...)
-            // Shift right by 1, increment exponent
-            norm_exp  = raw_exp + 7'sd1;
-            norm_frac = raw_product[20:11]; // Top 10 fraction bits
-            G         = raw_product[10];
-            R         = raw_product[9];
-            S         = |raw_product[8:0];  // Sticky is OR of all remaining bits
-        end else begin
-            // Result is < 2.0 (e.g., 01.xxxx...)
-            // No shift needed
-            norm_exp  = raw_exp;
-            norm_frac = raw_product[19:10];
-            G         = raw_product[9];
-            R         = raw_product[8];
-            S         = |raw_product[7:0];
-        end
-    end
+    // Flattened multiplexers for independent, parallel LUT mapping
+    wire [9:0] norm_frac = is_norm ? raw_product[20:11] : raw_product[19:10];
+    wire G = is_norm ? raw_product[10] : raw_product[9];
+    wire R = is_norm ? raw_product[9]  : raw_product[8];
+
+    // Sticky bit reuse: calculate the bottom 8 bits once!
+    wire S_base = |raw_product[7:0];
+    wire S = is_norm ? (S_base | raw_product[8]) : S_base;
+
+    wire signed [6:0] norm_exp = raw_exp + {6'd0, is_norm};
 
     // =======================================================================
     // STAGE 4: ROUNDING
@@ -84,41 +64,23 @@ module fp16_multiplier (
     end
 
     wire [10:0] rounded_frac = {1'b0, norm_frac} + round_up;
+    wire post_round_overflow = rounded_frac[10];
 
     // =======================================================================
-    // STAGE 5: POST-ROUNDING & EXCEPTION HANDLING
+    // STAGE 5: PARALLEL EXCEPTION HANDLING
     // =======================================================================
-    reg [9:0] final_frac;
-    reg [4:0] final_exp;
+    wire signed [6:0] final_exp_calc = norm_exp + {6'd0, post_round_overflow};
 
-    always @(*) begin
-        if (result_is_zero || norm_exp <= 7'sd0) begin
-            // Underflow or Zero input -> Return 0.0
-            final_exp  = 5'd0;
-            final_frac = 10'd0;
-        end else if (rounded_frac[10] == 1'b1) begin
-            // Post-rounding overflow (e.g., 1.111 rounded up to 10.000)
-            if (norm_exp + 7'sd1 >= 7'sd31) begin
-                final_exp  = 5'd31; // Infinity
-                final_frac = 10'd0;
-            end else begin
-                final_exp  = norm_exp[4:0] + 5'd1;
-                final_frac = 10'd0;
-            end
-        end else if (norm_exp >= 7'sd31) begin
-            // Exponent Overflow -> Return Infinity
-            final_exp  = 5'd31;
-            final_frac = 10'd0;
-        end else begin
-            // Normal operation
-            final_exp  = norm_exp[4:0];
-            final_frac = rounded_frac[9:0];
-        end
-    end
+    // Calculate exception flags independently to reduce logic depth
+    wire is_underflow = result_is_zero || (norm_exp <= 7'sd0);
+    wire is_overflow  = (!is_underflow) && (final_exp_calc >= 7'sd31);
 
-    // =======================================================================
-    // FINAL OUTPUT PACKING
-    // =======================================================================
+    wire [4:0] final_exp  = is_underflow ? 5'd0 :
+                            is_overflow  ? 5'd31 :
+                            final_exp_calc[4:0];
+
+    wire [9:0] final_frac = (is_underflow || is_overflow || post_round_overflow) ? 10'd0 : rounded_frac[9:0];
+
     assign result = {o_sign, final_exp, final_frac};
 
 endmodule
