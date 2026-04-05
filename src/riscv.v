@@ -1,15 +1,15 @@
 module riscv_pipelined(
     input clk, reset,
-    output [31:0] PCF,
+    output [29:0] PCF_out,
     input  [31:0] ImemOut,
     output [3:0]       MemWriteM,
-    output [31:0] ALUResultM, WriteDataM,
+    output [29:0] ALUResultM_out, WriteDataM,
     output        MemEnM,iMemEnF,
     input  [31:0] ReadDataM
 );
     // --- SIGNALS ---
     // Fetch
-    wire [31:0] PCNext, PCPlus4F;
+    wire [31:0] PCF, PCNext, PCPlus4F;
     wire StallF, StallD, FlushD, FlushE;
     wire validF;
     
@@ -59,6 +59,7 @@ module riscv_pipelined(
     wire validW;
 
     // --- FETCH STAGE ---
+    assign PCF_out=PCF[31:2];
     assign PCNext = PCSrcE ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF=!StallF;
@@ -164,7 +165,7 @@ module riscv_pipelined(
     // --- MEMORY STAGE ---
     //  instance of data memory is not needed since it's provided as an input (ReadDataM) and output (MemWriteM, ALUResultM, WriteDataM)
     // make instnces of memory (dummy) for verification and connect in top-level testbench if needed
-
+    assign ALUResultM_out=ALUResultM[31:2];
     // --- M/W REGISTER ---
     pipe_reg #(32) m_w_pc(clk, reset, 1'b1, 1'b0, PCM, PCW);
 
