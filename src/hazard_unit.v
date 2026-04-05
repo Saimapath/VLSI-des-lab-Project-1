@@ -1,35 +1,48 @@
-
 module hazard_unit(
-    input  [4:0] rs1d, rs2d, rs1e, rs2e, rde, rdm, rdw,
-    input        regwritem, regwritew, pcsrc_e,
-    input  [1:0] resultsrce,
+    input  [4:0] rs1d, rs2d, rde, rdm, rdw,
+    input        regwritee, regwritem, regwritew, pcsrc_e,
+    input  [1:0] resultsrce, resultsrcm, // ADDED: resultsrcm to check MEM stage
     input        valide, validm, validw,
-    output reg [1:0] forwardae, forwardbe,
+    output reg [1:0] forwardad, forwardbd,
     output       stallf, stalld, flushe, flushd
 );
-    // --- Forwarding Logic ---
-    // Forwarding handles Data Hazards (RAW) by bypassing values from MEM or WB
+    // --- Forwarding Logic (in Decode Stage) ---
+    // Prioritize the youngest instruction (EX > MEM > WB)
     always @(*) begin
-        // Forward A (rs1)
-        if (validm && ((rs1e == rdm) && regwritem) && (rs1e != 0)) forwardae = 2'b10; 
-        else if (validw && ((rs1e == rdw) && regwritew) && (rs1e != 0)) forwardae = 2'b01; 
-        else                                                  forwardae = 2'b00; // No forwarding
-  // Forward B (rs2)
-        if (validm && ((rs2e == rdm) && regwritem) && (rs2e != 0))      
-            forwardbe = 2'b10;
-        else if (validw && ((rs2e == rdw) && regwritew) && (rs2e != 0)) 
-            forwardbe = 2'b01;
+        // Forward A (rs1 in Decode)
+        if (valide && ((rs1d == rde) && regwritee) && (rs1d != 0)) 
+            forwardad = 2'b11; // 1. Forward from EX (ALUResultE)
+        else if (validm && ((rs1d == rdm) && regwritem) && (rs1d != 0)) 
+            forwardad = 2'b10; // 2. Forward from MEM (ALUResultM)
+        else if (validw && ((rs1d == rdw) && regwritew) && (rs1d != 0)) 
+            forwardad = 2'b01; // 3. Forward from WB (ResultW)
+        else 
+            forwardad = 2'b00; // 4. RegFile
+            
+        // Forward B (rs2 in Decode)
+        if (valide && ((rs2d == rde) && regwritee) && (rs2d != 0))      
+            forwardbd = 2'b11; // 1. Forward from EX
+        else if (validm && ((rs2d == rdm) && regwritem) && (rs2d != 0))      
+            forwardbd = 2'b10; // 2. Forward from MEM
+        else if (validw && ((rs2d == rdw) && regwritew) && (rs2d != 0)) 
+            forwardbd = 2'b01; // 3. Forward from WB
         else                                                  
-            forwardbe = 2'b00;
+            forwardbd = 2'b00; // 4. RegFile
     end
 
     // --- Stall and Flush Logic ---
-    // Handles Load-Use hazards and Control hazards (Branching)
-    // wire lwstall = resultsrce0 && ((rs1d == rde) || (rs2d == rde));
-    wire lwstall = valide && (resultsrce == 2'b01) && (rde != 5'd0) && ((rs1d == rde) || (rs2d == rde));
     
-    assign stallf = lwstall;               // Freeze PC
-    assign stalld = lwstall;               // Freeze Decode
-    assign flushd = pcsrc_e ;               // Flush Decode on branch
-    assign flushe =  pcsrc_e || lwstall;    // Flush Execute on branch or load-stall4
+    // 1. If Load is in EX (requires 2 stalls to reach WB)
+    wire lwstall_e = valide && (resultsrce == 2'b01) && (rde != 5'd0) && ((rs1d == rde) || (rs2d == rde));
+    
+    // 2. If Load is in MEM (requires 1 stall to reach WB)
+    wire lwstall_m = validm && (resultsrcm == 2'b01) && (rdm != 5'd0) && ((rs1d == rdm) || (rs2d == rdm));
+    
+    // Combined stall condition
+    wire stall_req = lwstall_e || lwstall_m;
+    
+    assign stallf = stall_req;             // Freeze PC
+    assign stalld = stall_req;             // Freeze Decode
+    assign flushd = pcsrc_e;               // Flush Decode on branch
+    assign flushe = pcsrc_e || stall_req;  // Flush Execute on branch or load-stall
 endmodule
