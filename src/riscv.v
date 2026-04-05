@@ -1,19 +1,20 @@
 module riscv_pipelined(
     input clk, reset,
-    output [31:0] PCF,
+    output [29:0] PCF_out,
     input  [31:0] ImemOut,
     output [3:0]       MemWriteM,
-    output [31:0] ALUResultM, WriteDataM,
+    output [29:0] ALUResultM_out, WriteDataM,
     output        MemEnM,iMemEnF,
     input  [31:0] ReadDataM
 );
     // --- SIGNALS ---
     // Fetch
-    wire [31:0] PCNext, PCPlus4F;
+    wire [31:0] PCF, PCNext, PCPlus4F;
     wire StallF, StallD, FlushD, FlushE;
     wire validF;
     
     // Decode
+    wire [1:0] ForwardAD, ForwardBD;
     wire [31:0] InstrD, PCD, PCPlus4D, RD1D, RD2D, ImmExtD;
     wire [4:0]  Rs1D, Rs2D, RdD;
     wire RegWriteD, JumpD,JalrD, BranchD,zero_for_takenD, ALUSrcD;
@@ -26,10 +27,11 @@ module riscv_pipelined(
 
     // Execute
     wire [31:0] RD1E, RD2E, ImmExtE, PCE, PCPlus4E, PCTargetE, UpimmE, AdderOut;
-    wire [31:0] SrcAE, SrcBE, WriteDataE, ALUResultE, ForwardResultM;
+    wire [31:0] SrcAE, SrcBE, WriteDataE, ALUResultE, ForwardResultM, ForwardResultE;
     wire [4:0]  Rs1E, Rs2E, RdE;
     wire [3:0]  ALUControlE, MemWriteE;
-    wire [1:0]  ResultSrcE, ForwardAE, ForwardBE;
+    wire [1:0]  ResultSrcE;
+    // , ForwardAE, ForwardBE;
     wire [2:0]  LoadBitsE;
     wire RegWriteE, JumpE, JalrE, BranchE,zero_for_takenE, ALUSrcE, ZeroE, PCSrcE;
     wire MemEnE;
@@ -57,6 +59,7 @@ module riscv_pipelined(
     wire validW;
 
     // --- FETCH STAGE ---
+    assign PCF_out=PCF[31:2];
     assign PCNext = PCSrcE ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF=!StallF;
@@ -102,8 +105,24 @@ module riscv_pipelined(
 
     assign validD=FlushE ? 1'b0 : validD_1;
 
+    assign ForwardResultE=(ResultSrcE==2'b00)?ALUResultE:(ResultSrcE==2'b10)?PCPlus4E:UpimmE;
+
+    assign ForwardResultM=(ResultSrcM==2'b00)?ALUResultM:(ResultSrcM==2'b10)?PCPlus4M:UpimmM;
+    wire [31:0] SrcAD = (ForwardAD == 2'b11) ? ForwardResultE :
+                        (ForwardAD == 2'b10) ? ForwardResultM : 
+                        (ForwardAD == 2'b01) ? ResultW : RD1D;
+
+    wire [31:0] WriteDataD = (ForwardBD == 2'b11) ? ForwardResultE :
+                             (ForwardBD == 2'b10) ? ForwardResultM : 
+                             (ForwardBD == 2'b01) ? ResultW : RD2D;
+
+
     // --- D/E REGISTER ---
-    pipe_reg #(160) d_e_data(clk, reset, 1'b1, FlushE, {RD1D, RD2D, PCD, ImmExtD, PCPlus4D}, {RD1E, RD2E, PCE, ImmExtE, PCPlus4E});
+    // pipe_reg #(160) d_e_data(clk, reset, 1'b1, FlushE, {RD1D, RD2D, PCD, ImmExtD, PCPlus4D}, {RD1E, RD2E, PCE, ImmExtE, PCPlus4E});
+    pipe_reg #(160) d_e_data(clk, reset, 1'b1, FlushE, 
+        {SrcAD, WriteDataD, PCD, ImmExtD, PCPlus4D}, 
+        {RD1E, RD2E, PCE, ImmExtE, PCPlus4E}
+    );
     pipe_reg #(15)  d_e_addr(clk, reset, 1'b1, FlushE, {Rs1D, Rs2D, RdD}, {Rs1E, Rs2E, RdE});
     pipe_reg #(20)  d_e_ctrl(clk, reset, 1'b1, FlushE, 
         {RegWriteD, ResultSrcD, MemWriteD, JumpD, JalrD, BranchD, zero_for_takenD,ALUControlD, ALUSrcD, upimmD, LoadBitsD}, 
@@ -115,10 +134,9 @@ module riscv_pipelined(
 
     // --- EXECUTE STAGE ---
 
-    assign ForwardResultM=(ResultSrcM==2'b00)?ALUResultM:(ResultSrcM==2'b10)?PCPlus4M:UpimmM;
 
-    assign SrcAE = (ForwardAE == 2'b10) ? ForwardResultM : (ForwardAE == 2'b01) ? ResultW : RD1E;
-    assign WriteDataE = (ForwardBE == 2'b10) ? ForwardResultM : (ForwardBE == 2'b01) ? ResultW : RD2E;
+    assign SrcAE =  RD1E;
+    assign WriteDataE =  RD2E;
     assign SrcBE = ALUSrcE ? ImmExtE : WriteDataE;
 
     // assign validE=FlushE ? 1'b0 : validE_1;
@@ -147,7 +165,7 @@ module riscv_pipelined(
     // --- MEMORY STAGE ---
     //  instance of data memory is not needed since it's provided as an input (ReadDataM) and output (MemWriteM, ALUResultM, WriteDataM)
     // make instnces of memory (dummy) for verification and connect in top-level testbench if needed
-
+    assign ALUResultM_out=ALUResultM[31:2];
     // --- M/W REGISTER ---
     pipe_reg #(32) m_w_pc(clk, reset, 1'b1, 1'b0, PCM, PCW);
 
@@ -171,14 +189,14 @@ module riscv_pipelined(
                   UpimmW; // For ResultSrcW == 2'b11
 
 // --- HAZARD UNIT ---
-    hazard_unit hu( 
-        .rs1d(Rs1D), .rs2d(Rs2D), .rs1e(Rs1E), .rs2e(Rs2E), 
+   hazard_unit hu( 
+        .rs1d(Rs1D), .rs2d(Rs2D), 
         .rde(RdE), .rdm(RdM), .rdw(RdW), 
-        .regwritem(RegWriteM), .regwritew(RegWriteW), 
-        .resultsrce(ResultSrcE),   
+        .regwritee(RegWriteE), .regwritem(RegWriteM), .regwritew(RegWriteW), 
+        .resultsrce(ResultSrcE), .resultsrcm(ResultSrcM),
         .pcsrc_e(PCSrcE), 
-        .valide(validE), .validm(validM), .validw(validW), // <--- CONNECT VALID BITS
-        .forwardae(ForwardAE), .forwardbe(ForwardBE), 
+        .valide(validE), .validm(validM), .validw(validW), 
+        .forwardad(ForwardAD), .forwardbd(ForwardBD), 
         .stallf(StallF), .stalld(StallD), .flushe(FlushE), .flushd(FlushD)
     );
 
