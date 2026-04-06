@@ -3,18 +3,19 @@ module riscv_pipelined(
     output [29:0] PCF_out,
     input  [31:0] ImemOut,
     output [3:0]       MemWriteM,
-    output [29:0] ALUResultM_out, WriteDataM,
+    output [29:0] ALUResultM_out, 
+    output [31:0] WriteDataM,
     output        MemEnM,iMemEnF,
     input  [31:0] ReadDataM
 );
     // --- SIGNALS ---
     // Fetch
-    wire [31:0] PCF, PCNext, PCPlus4F;
+    wire [31:0] PCNext, PCPlus4F, PCF;
     wire StallF, StallD, FlushD, FlushE;
     wire validF;
     
     // Decode
-    wire [1:0] ForwardAD, ForwardBD;
+    // wire [1:0] ForwardAD, ForwardBD;
     wire [31:0] InstrD, PCD, PCPlus4D, RD1D, RD2D, ImmExtD;
     wire [4:0]  Rs1D, Rs2D, RdD;
     wire RegWriteD, JumpD,JalrD, BranchD,zero_for_takenD, ALUSrcD;
@@ -30,8 +31,7 @@ module riscv_pipelined(
     wire [31:0] SrcAE, SrcBE, WriteDataE, ALUResultE, ForwardResultM, ForwardResultE;
     wire [4:0]  Rs1E, Rs2E, RdE;
     wire [3:0]  ALUControlE, MemWriteE;
-    wire [1:0]  ResultSrcE;
-    // , ForwardAE, ForwardBE;
+    wire [1:0]  ResultSrcE, ForwardAE, ForwardBE;
     wire [2:0]  LoadBitsE;
     wire RegWriteE, JumpE, JalrE, BranchE,zero_for_takenE, ALUSrcE, ZeroE, PCSrcE;
     wire MemEnE;
@@ -57,9 +57,11 @@ module riscv_pipelined(
     wire [2:0]      LoadBitsW;
     wire RegWriteW;
     wire validW;
+    
+    assign PCF_out=PCF[31:2];
+    assign ALUResultM_out=ALUResultM[31:2];
 
     // --- FETCH STAGE ---
-    assign PCF_out=PCF[31:2];
     assign PCNext = PCSrcE ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF=!StallF;
@@ -68,17 +70,33 @@ module riscv_pipelined(
     // --- F/D REGISTER ---
     // pipe_reg #(32) f_d_instr(clk, reset, !StallD, FlushD, ImemOut, InstrD);
     
+    // pipe_reg #(32) pcreg(clk, reset, !StallF, 1'b0, PCNext, PCF);
+
+    // // assign InstrD = (FlushD || reset) ? 32'h00000000 : ImemOut;
+    // assign InstrD = ImemOut;
+
+    // pipe_reg #(32) f_d_pc(clk, reset, !StallD, FlushD, PCF, PCD);
+    // pipe_reg #(32) f_d_pc4(clk, reset, !StallD, FlushD, PCPlus4F, PCPlus4D);
+    // pipe_reg #(1) f_d_valid(clk, reset, !StallD, FlushD, validF, validD_1);
+
+// --- F/D REGISTER ---
     pipe_reg #(32) pcreg(clk, reset, !StallF, 1'b0, PCNext, PCF);
+    
+    assign InstrD = ImemOut; 
+    
+    // CHANGED: Tied Flush to 1'b0! This deletes the 11ns Net Delay!
+    pipe_reg #(32) f_d_pc(clk, reset, !StallD, 1'b0, PCF, PCD);
+    pipe_reg #(32) f_d_pc4(clk, reset, !StallD, 1'b0, PCPlus4F, PCPlus4D);
+    pipe_reg #(1) f_d_valid(clk, reset, !StallD, 1'b0, validF, validD_1);
 
-    assign InstrD = (FlushD || reset) ? 32'h00000000 : ImemOut;
 
-    pipe_reg #(32) f_d_pc(clk, reset, !StallD, FlushD, PCF, PCD);
-    pipe_reg #(32) f_d_pc4(clk, reset, !StallD, FlushD, PCPlus4F, PCPlus4D);
-    pipe_reg #(1) f_d_valid(clk, reset, !StallD, FlushD, validF, validD_1);
 
     // --- DECODE STAGE ---
-    assign Rs1D = InstrD[19:15];
-    assign Rs2D = InstrD[24:20];
+    // assign Rs1D = InstrD[19:15];
+    // assign Rs2D = InstrD[24:20];
+
+    assign Rs1D = ImemOut[19:15];
+    assign Rs2D = ImemOut[24:20];
     assign RdD  = InstrD[11:7];
 
     controller ctrl(
@@ -105,39 +123,93 @@ module riscv_pipelined(
 
     assign validD=FlushE ? 1'b0 : validD_1;
 
-    assign ForwardResultE=(ResultSrcE==2'b00)?ALUResultE:(ResultSrcE==2'b10)?PCPlus4E:UpimmE;
+    // assign ForwardResultE=(ResultSrcE==2'b00)?ALUResultE:(ResultSrcE==2'b10)?PCPlus4E:UpimmE;
 
-    assign ForwardResultM=(ResultSrcM==2'b00)?ALUResultM:(ResultSrcM==2'b10)?PCPlus4M:UpimmM;
-    wire [31:0] SrcAD = (ForwardAD == 2'b11) ? ForwardResultE :
-                        (ForwardAD == 2'b10) ? ForwardResultM : 
-                        (ForwardAD == 2'b01) ? ResultW : RD1D;
+    // wire [31:0] SrcAD = (ForwardAD == 2'b11) ? ForwardResultE :
+    //                     (ForwardAD == 2'b10) ? ForwardResultM : 
+    //                     (ForwardAD == 2'b01) ? ResultW : RD1D;
 
-    wire [31:0] WriteDataD = (ForwardBD == 2'b11) ? ForwardResultE :
-                             (ForwardBD == 2'b10) ? ForwardResultM : 
-                             (ForwardBD == 2'b01) ? ResultW : RD2D;
+    // wire [31:0] WriteDataD = (ForwardBD == 2'b11) ? ForwardResultE :
+                            //  (ForwardBD == 2'b10) ? ForwardResultM : 
+                            //  (ForwardBD == 2'b01) ? ResultW : RD2D;
 
 
     // --- D/E REGISTER ---
-    // pipe_reg #(160) d_e_data(clk, reset, 1'b1, FlushE, {RD1D, RD2D, PCD, ImmExtD, PCPlus4D}, {RD1E, RD2E, PCE, ImmExtE, PCPlus4E});
-    pipe_reg #(160) d_e_data(clk, reset, 1'b1, FlushE, 
-        {SrcAD, WriteDataD, PCD, ImmExtD, PCPlus4D}, 
-        {RD1E, RD2E, PCE, ImmExtE, PCPlus4E}
-    );
-    pipe_reg #(15)  d_e_addr(clk, reset, 1'b1, FlushE, {Rs1D, Rs2D, RdD}, {Rs1E, Rs2E, RdE});
-    pipe_reg #(20)  d_e_ctrl(clk, reset, 1'b1, FlushE, 
+    // pipe_reg #(160) d_e_data(clk, reset, 1'b1, 1'b0, {RD1D, RD2D, PCD, ImmExtD, PCPlus4D}, {RD1E, RD2E, PCE, ImmExtE, PCPlus4E});
+    
+    // pipe_reg #(15)  d_e_addr(clk, reset, 1'b1, 1'b0, {Rs1D, Rs2D, RdD}, {Rs1E, Rs2E, RdE});
+
+    // pipe_reg #(20)  d_e_ctrl(clk, reset, 1'b1, FlushE, 
+    //     {RegWriteD, ResultSrcD, MemWriteD, JumpD, JalrD, BranchD, zero_for_takenD,ALUControlD, ALUSrcD, upimmD, LoadBitsD}, 
+    //     {RegWriteE, ResultSrcE, MemWriteE, JumpE, JalrE, BranchE,zero_for_takenE, ALUControlE, ALUSrcE, upimmE, LoadBitsE}
+    // );
+
+    // pipe_reg #(1) d_e_en(clk, reset, 1'b1, FlushE, MemEnD, MemEnE);
+    // pipe_reg #(1) d_e_valid(clk, reset, 1'b1, FlushE, validD, validE);
+
+    // --- D/E REGISTER ---
+    pipe_reg #(160) d_e_data(clk, reset, 1'b1, 1'b0, {RD1D, RD2D, PCD, ImmExtD, PCPlus4D}, {RD1E, RD2E, PCE, ImmExtE, PCPlus4E});
+    
+    pipe_reg #(15)  d_e_addr(clk, reset, 1'b1, 1'b0, {Rs1D, Rs2D, RdD}, {Rs1E, Rs2E, RdE});
+
+    // CHANGED: Use ActualFlushE here!
+    pipe_reg #(20)  d_e_ctrl(clk, reset, 1'b1, ActualFlushE, 
         {RegWriteD, ResultSrcD, MemWriteD, JumpD, JalrD, BranchD, zero_for_takenD,ALUControlD, ALUSrcD, upimmD, LoadBitsD}, 
         {RegWriteE, ResultSrcE, MemWriteE, JumpE, JalrE, BranchE,zero_for_takenE, ALUControlE, ALUSrcE, upimmE, LoadBitsE}
     );
 
-    pipe_reg #(1) d_e_en(clk, reset, 1'b1, FlushE, MemEnD, MemEnE);
-    pipe_reg #(1) d_e_valid(clk, reset, 1'b1, FlushE, validD, validE);
+    pipe_reg #(1) d_e_en(clk, reset, 1'b1, ActualFlushE, MemEnD, MemEnE);
+    pipe_reg #(1) d_e_valid(clk, reset, 1'b1, ActualFlushE, validD, validE);
 
     // --- EXECUTE STAGE ---
 
+    // ---> NEW: The Fetch Decoupler <---
+    // Remember a branch for 1 extra cycle to kill the BRAM ghost instruction 
+    // at the Execute door, instead of routing a flush wire across the chip!
+    reg BranchFlushDelay;
+    always @(posedge clk or posedge reset) begin
+        if (reset) BranchFlushDelay <= 1'b0;
+        else       BranchFlushDelay <= PCSrcE;
+    end
 
-    assign SrcAE =  RD1E;
-    assign WriteDataE =  RD2E;
+    // ActualFlushE combines the Hazard Unit's FlushE with our delayed branch flush
+    wire ActualFlushE = FlushE || BranchFlushDelay;
+
+    wire [31:0] ForwardDataM = (ResultSrcM == 2'b00) ? ALUResultM : 
+                               (ResultSrcM == 2'b10) ? PCPlus4M : 
+                               UpimmM;
+
+    wire [31:0] ForwardDataW = (ResultSrcW == 2'b00) ? ALUResultW : 
+                               (ResultSrcW == 2'b10) ? PCPlus4W : 
+                               UpimmW;
+
+    // --- Data Forwarding Multiplexers ---
+    assign SrcAE = (ForwardAE == 2'b11) ? HeldDataW :    // Load-Use Data
+                   (ForwardAE == 2'b10) ? ForwardDataM : // ALU data from MEM
+                   (ForwardAE == 2'b01) ? ForwardDataW : // ALU data from WB
+                   RD1E;                                 // RegFile
+
+    assign WriteDataE = (ForwardBE == 2'b11) ? HeldDataW : 
+                        (ForwardBE == 2'b10) ? ForwardDataM : 
+                        (ForwardBE == 2'b01) ? ForwardDataW : 
+                        RD2E;
+
     assign SrcBE = ALUSrcE ? ImmExtE : WriteDataE;
+    // assign SrcAE = (ForwardAE == 2'b11) ? HeldDataW :      // <-- FORWARD FROM DFF
+    //                (ForwardAE == 2'b10) ? ForwardResultM : // MEM Stage
+    //                (ForwardAE == 2'b01) ? ResultW :        // WB Stage
+    //                RD1E;                                   // RegFile
+
+    // assign WriteDataE = (ForwardBE == 2'b11) ? HeldDataW :      // <-- FORWARD FROM DFF
+    //                     (ForwardBE == 2'b10) ? ForwardResultM : 
+    //                     (ForwardBE == 2'b01) ? ResultW : 
+    //                     RD2E;
+
+    // assign SrcBE = ALUSrcE ? ImmExtE : WriteDataE;
+    // assign ForwardResultM=(ResultSrcM==2'b00)?ALUResultM:(ResultSrcM==2'b10)?PCPlus4M:UpimmM;
+
+    // assign SrcAE =  RD1E;
+    // assign WriteDataE =  RD2E;
 
     // assign validE=FlushE ? 1'b0 : validE_1;
     
@@ -165,7 +237,7 @@ module riscv_pipelined(
     // --- MEMORY STAGE ---
     //  instance of data memory is not needed since it's provided as an input (ReadDataM) and output (MemWriteM, ALUResultM, WriteDataM)
     // make instnces of memory (dummy) for verification and connect in top-level testbench if needed
-    assign ALUResultM_out=ALUResultM[31:2];
+
     // --- M/W REGISTER ---
     pipe_reg #(32) m_w_pc(clk, reset, 1'b1, 1'b0, PCM, PCW);
 
@@ -180,6 +252,22 @@ module riscv_pipelined(
     pipe_reg #(1) m_w_valid(clk, reset, 1'b1, 1'b0, validM, validW);
 
     // --- WRITEBACK STAGE ---
+
+    reg [31:0] HeldDataW;
+    reg [4:0]  HeldRdW;
+    reg        HeldRegWriteW;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            HeldDataW <= 32'b0;
+            HeldRdW   <= 5'b0;
+            HeldRegWriteW <= 1'b0;
+        end else begin
+            HeldDataW <= ResultW;
+            HeldRdW   <= RdW;
+            HeldRegWriteW <= RegWriteW;
+        end
+    end
     mem_extend mem_ext(ReadDataM, LoadBitsW, ReadDataW_ext);
     assign RegWriteW = RegWriteW_1 && validW; // Ensure we only write back when the instruction is valid
     
@@ -188,17 +276,22 @@ module riscv_pipelined(
                   (ResultSrcW == 2'b10) ? PCPlus4W :
                   UpimmW; // For ResultSrcW == 2'b11
 
+
+
 // --- HAZARD UNIT ---
-   hazard_unit hu( 
+  // --- HAZARD UNIT INSTANTIATION ---
+    hazard_unit hu( 
         .rs1d(Rs1D), .rs2d(Rs2D), 
+        .rs1e(Rs1E), .rs2e(Rs2E), 
         .rde(RdE), .rdm(RdM), .rdw(RdW), 
+        .held_rd(HeldRdW),                      // <-- NEW INPUT
         .regwritee(RegWriteE), .regwritem(RegWriteM), .regwritew(RegWriteW), 
+        .held_regwrite(HeldRegWriteW),          // <-- NEW INPUT
         .resultsrce(ResultSrcE), .resultsrcm(ResultSrcM),
         .pcsrc_e(PCSrcE), 
         .valide(validE), .validm(validM), .validw(validW), 
-        .forwardad(ForwardAD), .forwardbd(ForwardBD), 
+        .forwardae(ForwardAE), .forwardbe(ForwardBE), 
         .stallf(StallF), .stalld(StallD), .flushe(FlushE), .flushd(FlushD)
     );
-
     // make additions for remaing instructuoms as illustrated im the diagram.
 endmodule
