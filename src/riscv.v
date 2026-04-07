@@ -150,8 +150,8 @@ module riscv_pipelined(
     // =========================================================================
 
     // --- The Fetch Decoupler ---
-    always @(posedge clk or posedge reset) begin
-        if (reset) BranchFlushDelay <= 1'b0;
+    always @(posedge clk or negedge reset) begin
+        if (!reset) BranchFlushDelay <= 1'b0;
         else       BranchFlushDelay <= PCSrcE;
     end
     assign ActualFlushE = FlushE || BranchFlushDelay;
