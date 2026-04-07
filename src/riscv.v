@@ -38,8 +38,9 @@ module riscv_pipelined(
     wire [1:0]  ResultSrcE;
     wire        RegWriteE, JumpE, JalrE, BranchE, zero_for_takenE, ALUSrcE;
     wire        ZeroE, PCSrcE, MemEnE, upimmE, validE;
-    wire        FlushE, ActualFlushE;
-    wire        is_eq, is_lt, is_ltu;
+    wire        FlushE;
+(* keep = "true" *) wire ActualFlushE;
+        wire        is_eq, is_lt, is_ltu;
     reg         FastZeroE, BranchFlushDelay;
 
     // --- Memory Stage ---
@@ -62,7 +63,10 @@ module riscv_pipelined(
     // =========================================================================
 
     assign PCF_out  = PCF[31:2];
-    assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
+    // assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
+
+        (* keep = "true" *) wire PCSrcE_pc = PCSrcE;
+    assign PCNext   = PCSrcE_pc ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF   = !StallF;
     assign iMemEnF  = !StallF; 
@@ -150,11 +154,25 @@ module riscv_pipelined(
     // =========================================================================
 
     // --- The Fetch Decoupler ---
+    // always @(posedge clk or posedge reset) begin
+    //     if (reset) BranchFlushDelay <= 1'b0;
+    //     else       BranchFlushDelay <= PCSrcE;
+    // end
+    // assign ActualFlushE = FlushE || BranchFlushDelay;
+
+// --- The Fetch Decoupler ---
     always @(posedge clk or negedge reset) begin
         if (!reset) BranchFlushDelay <= 1'b0;
         else       BranchFlushDelay <= PCSrcE;
     end
-    assign ActualFlushE = FlushE || BranchFlushDelay;
+    
+    // Compute the base flush signal
+    wire base_ActualFlushE = FlushE || BranchFlushDelay;
+    
+    // Force Vivado to physically duplicate the flush wires
+    assign ActualFlushE    = base_ActualFlushE; // dedicated to Int registers
+    (* keep = "true" *) wire ActualFlushE_fp = base_ActualFlushE; // dedicated to FP registers
+
 
     // --- ALU Math & Execution ---
     assign SrcAE      = RD1E;
