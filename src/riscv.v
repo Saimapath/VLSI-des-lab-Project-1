@@ -38,10 +38,11 @@ module riscv_pipelined(
     wire [1:0]  ResultSrcE;
     wire        RegWriteE, JumpE, JalrE, BranchE, zero_for_takenE, ALUSrcE;
     wire        ZeroE, PCSrcE, MemEnE, upimmE, validE;
-    wire        FlushE;
-(* keep = "true" *) wire ActualFlushE;
-        wire        is_eq, is_lt, is_ltu;
+    wire        FlushE, ActualFlushE;
+    wire        is_eq, is_lt, is_ltu;
     reg         FastZeroE, BranchFlushDelay;
+
+    wire StallE;
 
     // --- Memory Stage ---
     wire [31:0] PCM, ALUResultM, PCPlus4M, UpimmM;
@@ -63,10 +64,7 @@ module riscv_pipelined(
     // =========================================================================
 
     assign PCF_out  = PCF[31:2];
-    // assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
-
-        (* keep = "true" *) wire PCSrcE_pc = PCSrcE;
-    assign PCNext   = PCSrcE_pc ? PCTargetE : PCPlus4F;
+    assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF   = !StallF;
     assign iMemEnF  = !StallF; 
@@ -94,6 +92,7 @@ module riscv_pipelined(
         .op(InstrD[6:0]), 
         .funct3(InstrD[14:12]), 
         .funct7b5(InstrD[30]), 
+        .funct7b0(InstrD[25]),
         .regwrite(RegWriteD), 
         .memwrite(MemWriteD), 
         .jump(JumpD), 
@@ -103,19 +102,21 @@ module riscv_pipelined(
         .resultsrc(ResultSrcD), 
         .immsrc(ImmSrcD), 
         .alucontrol(ALUControlD),
+        .Multcontrol(MultcontrolD),
+        .MultStart(MultStartD),
         .jalr(JalrD),
         .upimm(upimmD), 
         .loadbits(LoadBitsD),
         .MemEn(MemEnD)
     );
     
-    regfile rf(clk, RegWriteW, Rs1D, Rs2D, RdW, ResultW, RD1D, RD2D);
+    regfile rf(clk, reset, RegWriteW, Rs1D, Rs2D, RdW, ResultW, RD1D, RD2D);
     extend ext(InstrD[31:7], ImmSrcD, ImmExtD);
 
     assign validD = FlushE ? 1'b0 : validD_1;
 
     // --- Decode Stage Forwarding Logic ---
-    assign ForwardResultE = (ResultSrcE == 2'b00) ? ALUResultE : 
+    assign ForwardResultE = (ResultSrcE == 2'b00) ? ResultE : 
                             (ResultSrcE == 2'b10) ? PCPlus4E : UpimmE;
     
     assign ForwardResultM = (ResultSrcM == 2'b00) ? ALUResultM : 
@@ -130,23 +131,23 @@ module riscv_pipelined(
                         (ForwardBD == 2'b01) ? ResultW : RD2D;
 
     // --- D/E Pipeline Registers ---
-    pipe_reg #(160) d_e_data(clk, reset, 1'b1, 1'b0, 
+    pipe_reg #(160) d_e_data(clk, reset, !StallE, 1'b0, 
         {SrcAD, WriteDataD, PCD, ImmExtD, PCPlus4D}, 
         {RD1E, RD2E, PCE, ImmExtE, PCPlus4E}
     ); 
     
-    pipe_reg #(15) d_e_addr(clk, reset, 1'b1, 1'b0, 
+    pipe_reg #(15) d_e_addr(clk, reset, !StallE, 1'b0, 
         {Rs1D, Rs2D, RdD}, 
         {Rs1E, Rs2E, RdE}
     );
 
-    pipe_reg #(20) d_e_ctrl(clk, reset, 1'b1, ActualFlushE, 
-        {RegWriteD, ResultSrcD, MemWriteD, JumpD, JalrD, BranchD, zero_for_takenD, ALUControlD, ALUSrcD, upimmD, LoadBitsD}, 
-        {RegWriteE, ResultSrcE, MemWriteE, JumpE, JalrE, BranchE, zero_for_takenE, ALUControlE, ALUSrcE, upimmE, LoadBitsE}
+    pipe_reg #(22) d_e_ctrl(clk, reset, !StallE, ActualFlushE, 
+        {RegWriteD, ResultSrcD, MemWriteD, JumpD, JalrD, BranchD, zero_for_takenD, ALUControlD, MultcontrolD, ALUSrcD, upimmD, LoadBitsD}, 
+        {RegWriteE, ResultSrcE, MemWriteE, JumpE, JalrE, BranchE, zero_for_takenE, ALUControlE, MultcontrolE, ALUSrcE, upimmE, LoadBitsE}
     );
 
-    pipe_reg #(1) d_e_en(clk, reset, 1'b1, ActualFlushE, MemEnD, MemEnE);
-    pipe_reg #(1) d_e_valid(clk, reset, 1'b1, ActualFlushE, validD, validE);
+    pipe_reg #(1) d_e_en(clk, reset, !StallE, ActualFlushE, MemEnD, MemEnE);
+    pipe_reg #(1) d_e_valid(clk, reset, !StallE, ActualFlushE, validD, validE);
 
 
     // =========================================================================
@@ -154,25 +155,11 @@ module riscv_pipelined(
     // =========================================================================
 
     // --- The Fetch Decoupler ---
-    // always @(posedge clk or posedge reset) begin
-    //     if (reset) BranchFlushDelay <= 1'b0;
-    //     else       BranchFlushDelay <= PCSrcE;
-    // end
-    // assign ActualFlushE = FlushE || BranchFlushDelay;
-
-// --- The Fetch Decoupler ---
     always @(posedge clk or negedge reset) begin
         if (!reset) BranchFlushDelay <= 1'b0;
         else       BranchFlushDelay <= PCSrcE;
     end
-    
-    // Compute the base flush signal
-    wire base_ActualFlushE = FlushE || BranchFlushDelay;
-    
-    // Force Vivado to physically duplicate the flush wires
-    assign ActualFlushE    = base_ActualFlushE; // dedicated to Int registers
-    (* keep = "true" *) wire ActualFlushE_fp = base_ActualFlushE; // dedicated to FP registers
-
+    assign ActualFlushE = FlushE || BranchFlushDelay;
 
     // --- ALU Math & Execution ---
     assign SrcAE      = RD1E;
@@ -180,9 +167,37 @@ module riscv_pipelined(
     assign SrcBE      = ALUSrcE ? ImmExtE : WriteDataE;
 
     rv32i_alu alu_unit(SrcAE, SrcBE, ALUControlE, ALUResultE, ZeroE);
+    //************************MultiplierBlock******************************************************************
+    //StallE is added in Hazard Unit
+    //All control units added in controller
+    wire MultStartD, MultBusy;
+    reg MultStartE = 1'b0;
+    wire [1:0] MultcontrolD, MultcontrolE;
+    wire [31:0] MultResultE;
+    wire validEf;
+    assign validEf = validE & (!StallE);
+    wire execbusy;
+    //assign MultStartE = MultStartE_reg;
+    assign execbusy = MultStartE | MultBusy;
+    reg Multop = 1'b0;
+    always @(posedge clk or negedge reset) begin
+        if(!reset) begin
+            Multop <= 1'b0; 
+            MultStartE<=1'b0;
+        end else begin
+            Multop <= StallE;
+            MultStartE <= MultStartD & (~MultBusy);
+        end
+    end
+ 
+    multiplier_32bit mult_unit(SrcAE, SrcBE, MultcontrolE, clk, reset, MultStartE, MultBusy, MultResultE);
+
+    wire [31:0] ResultE = Multop? MultResultE:ALUResultE;
+    // Then pass the "Final" result into the existing pipeline register
+    //*********************************************************************************************************
     
     assign AdderOut  = PCE + ImmExtE;
-    assign PCTargetE = JalrE ? ALUResultE : AdderOut;
+    assign PCTargetE = JalrE ? ResultE : AdderOut;
     assign UpimmE    = upimmE ? ImmExtE : AdderOut;
 
     // --- Shadow Comparators (Fast Branch Logic) ---
@@ -201,7 +216,7 @@ module riscv_pipelined(
 
     // --- E/M Pipeline Registers ---
     pipe_reg #(32) e_m_pc(clk, reset, 1'b1, 1'b0, PCE, PCM);
-    pipe_reg #(32) e_m_alu(clk, reset, 1'b1, 1'b0, ALUResultE, ALUResultM);
+    pipe_reg #(32) e_m_alu(clk, reset, 1'b1, 1'b0, ResultE, ALUResultM);
     pipe_reg #(32) e_m_wd(clk, reset, 1'b1, 1'b0, WriteDataE, WriteDataM);
     pipe_reg #(5)  e_m_rd(clk, reset, 1'b1, 1'b0, RdE, RdM);
     pipe_reg #(32) e_m_upimm(clk, reset, 1'b1, 1'b0, UpimmE, UpimmM);
@@ -212,7 +227,7 @@ module riscv_pipelined(
     );
     pipe_reg #(1)  e_m_en(clk, reset, 1'b1, 1'b0, MemEnE, MemEnM);
     pipe_reg #(3)  e_m_load(clk, reset, 1'b1, 1'b0, LoadBitsE, LoadBitsM);
-    pipe_reg #(1)  e_m_valid(clk, reset, 1'b1, 1'b0, validE, validM);
+    pipe_reg #(1)  e_m_valid(clk, reset, 1'b1, 1'b0, validEf, validM);
 
 
     // =========================================================================
@@ -260,11 +275,13 @@ module riscv_pipelined(
         .regwritee(RegWriteE), .regwritem(RegWriteM), .regwritew(RegWriteW), 
         .resultsrce(ResultSrcE), .resultsrcm(ResultSrcM),
         .pcsrc_e(PCSrcE), 
-        .valide(validE), .validm(validM), .validw(validW), 
+        .valide(validE), .validm(validM), .validw(validW),
+        .execbusy(execbusy),
         .forwardad(ForwardAD), .forwardbd(ForwardBD), 
         .stallf(StallF), 
         .stalld_pc(StallD_pc), 
         .stalld_pc4(StallD_pc4), 
+        .stalle(StallE), 
         .flushe(FlushE), 
         .flushd(FlushD)
     );

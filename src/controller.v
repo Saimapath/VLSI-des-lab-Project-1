@@ -3,12 +3,16 @@ module controller(
     input  [6:0] op,
     input  [2:0] funct3,
     input        funct7b5,
+    input        funct7b0,
+
     output reg   regwrite, 
     output reg [3:0]   memwrite, 
     output reg   jump, branch,zero_for_taken, alusrc,
     output reg [1:0] resultsrc,
     output reg [2:0] immsrc, // Updated to 3 bits for more immediate types
     output reg [3:0] alucontrol,
+    output reg       MultStart,
+    output reg [1:0] Multcontrol,
 
     output reg jalr, // Added for JALR instruction
     output reg upimm, 
@@ -178,4 +182,13 @@ module controller(
             endcase
         endcase
     end
+    // Multiplication Start and Control Signals
+    always @(*) begin
+        Multcontrol = funct3[1:0];
+        if ((op == OP_R_TYPE) && (funct7b0 == 1'b1)) 
+            MultStart = 1'b1;
+        else 
+            MultStart = 1'b0;
+    end
+    
 endmodule

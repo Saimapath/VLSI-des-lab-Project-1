@@ -4,10 +4,11 @@ module hazard_unit(
     input        pcsrc_e,
     input  [1:0] resultsrce, resultsrcm,
     input        valide, validm, validw,
+    input        execbusy,
     output reg [1:0] forwardad, forwardbd,
     
     // Split stalld into two separate outputs to crush fanout
-    output       stallf, stalld_pc, stalld_pc4, flushe, flushd
+    output       stallf, stalld_pc, stalle, stalld_pc4, flushe, flushd
 );
 
     // --- 1. PRE-COMPUTE BOOLEAN MATCHES (DECODE STAGE FORWARDING) ---
@@ -46,15 +47,28 @@ module hazard_unit(
     wire lwstall_m = validm && (resultsrcm == 2'b01) && (rdm != 5'd0) && ((rs1d == rdm) || (rs2d == rdm));
     
     // Manual LUT replication to defeat the 100+ high-fanout routing delay
-    (* keep = "true" *) wire stall_req_F   = lwstall_e || lwstall_m;
-    (* keep = "true" *) wire stall_req_D1  = lwstall_e || lwstall_m;
-    (* keep = "true" *) wire stall_req_D2  = lwstall_e || lwstall_m;
-    (* keep = "true" *) wire stall_req_E   = lwstall_e || lwstall_m;
-    
-    assign stallf     = stall_req_F;              
-    assign stalld_pc  = stall_req_D1;             
-    assign stalld_pc4 = stall_req_D2;             
-    assign flushe     = pcsrc_e || stall_req_E;   
-    assign flushd     = pcsrc_e;               
+
+    // (* keep = "true" *) wire stall_req_F   = lwstall_e || lwstall_m || execbusy;
+    // (* keep = "true" *) wire stall_req_D1  = lwstall_e || lwstall_m || execbusy;
+    // (* keep = "true" *) wire stall_req_D2  = lwstall_e || lwstall_m || execbusy;
+    // (* keep = "true" *) wire stall_req_E   = lwstall_e || lwstall_m;
+
+    (* keep = "true" *) wire stall_req_F;
+    (* keep = "true" *) wire stall_req_D1;
+    (* keep = "true" *) wire stall_req_D2;
+    (* keep = "true" *) wire stall_req_E;
+
+    assign stall_req_F  = lwstall_e || lwstall_m || execbusy;
+    assign stall_req_D1 = lwstall_e || lwstall_m || execbusy;
+    assign stall_req_D2 = lwstall_e || lwstall_m || execbusy;
+    assign stall_req_E  = lwstall_e || lwstall_m;
+
+    assign stallf     = stall_req_F;               
+    assign stalld_pc  = stall_req_D1;              
+    assign stalld_pc4 = stall_req_D2; 
+    assign flushe     = pcsrc_e || stall_req_E;
+
+    assign flushd     = pcsrc_e;
+    assign stalle = execbusy;               
 
 endmodule
