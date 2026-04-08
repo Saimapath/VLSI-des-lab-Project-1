@@ -38,7 +38,8 @@ module riscv_pipelined(
     wire [1:0]  ResultSrcE;
     wire        RegWriteE, JumpE, JalrE, BranchE, zero_for_takenE, ALUSrcE;
     wire        ZeroE, PCSrcE, MemEnE, upimmE, validE;
-    wire        FlushE, ActualFlushE;
+    wire        FlushE;
+(* keep = "true" *) wire ActualFlushE;
     wire        is_eq, is_lt, is_ltu;
     reg         FastZeroE, BranchFlushDelay;
 
@@ -64,7 +65,8 @@ module riscv_pipelined(
     // =========================================================================
 
     assign PCF_out  = PCF[31:2];
-    assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
+    (* keep = "true" *) wire PCSrcE_pc = PCSrcE;
+    assign PCNext   = PCSrcE_pc ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF   = !StallF;
     assign iMemEnF  = !StallF; 
