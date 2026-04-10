@@ -2,98 +2,61 @@ module riscv_soc(
     input clk,
     input reset
 );
-    // Interconnect wires
-    wire [31:0] PCF, ImemOut, ALUResultM, WriteDataM, ReadDataM;
+    wire [31:0] ImemOut, WriteDataM, ReadDataM;
+    wire [29:0] PCF, ALUResultM; 
     wire FlushD, FlushE;
     wire [31:0] Int_SrcAE;
     wire [3:0]  MemWriteM;
-    wire        MemEnM;
-    wire       iMemEnF;
+    wire        MemEnM, iMemEnF;
 
-
-  
-
-    // ---> ADDED: Bridge Wires (FP Datapath -> CPU Core) <---
+    // ---> Bridge Wires (FP Datapath <-> CPU Core) <---
     wire        fp_ReqIntWriteW;
     wire [31:0] fp_IntDataW;
     wire [4:0]  fp_IntRdW;
     wire        fp_MemWriteM;
     wire [31:0] fp_MemWriteDataM;
-    wire       fp_lwstall; // Tells main CPU to freeze if there's a load-use hazard in the FP pipeline
+    wire        fp_lwstall; 
+    wire        fp_sys_stall; 
 
     // Processor Instance
     riscv_pipelined cpu (
-        .clk(clk),
-        .reset(reset),
-        .PCF(PCF),
-        .ImemOut(ImemOut),
-        .MemWriteM(MemWriteM),
-        .iMemEnF(iMemEnF),
-        .MemEnM(MemEnM),
-        .ALUResultM(ALUResultM),
-        .WriteDataM(WriteDataM),
-        .ReadDataM(ReadDataM),
+        .clk(clk), .reset(reset), .PCF_out(PCF), .ImemOut(ImemOut),
+        .MemWriteM(MemWriteM), .iMemEnF(iMemEnF), .MemEnM(MemEnM),
+        .ALUResultM_out(ALUResultM), .WriteDataM(WriteDataM), .ReadDataM(ReadDataM),
 
-     // --- FP Interface --- 
+        // --- FP Interface --- 
         .FlushD_out(FlushD),
         .FlushE_out(FlushE),
         .Int_SrcAE_out(Int_SrcAE),
+        .fp_sys_stall(fp_sys_stall),  // <--- CHANGED: CPU Receives stall
         
-        // ---> CHANGED: Replaced placeholders with actual bridge wires
         .FP_ReqIntWriteW(fp_ReqIntWriteW),  
         .FP_IntDataW(fp_IntDataW),          
         .FP_IntRdW(fp_IntRdW),              
         .FP_MemWriteM(fp_MemWriteM),        
         .FP_MemWriteDataM(fp_MemWriteDataM),
-        .fp_lwstall(fp_lwstall) // Connect the FP load-use stall signal to the CPU
-
+        .fp_lwstall(fp_lwstall) 
     );
 
-    // =====================================================
-    // 2. FLOATING-POINT DATAPATH INSTANCE (ADDED)
-    // =====================================================
+    // FLOATING-POINT DATAPATH INSTANCE
     fp_datapath fpu_pipe (
-        .clk(clk),
-        .reset(reset),
+        .clk(clk), .reset(reset), .ImemOut(ImemOut), 
         
-        // --- Direct from Instruction Memory ---
-        .ImemOut(ImemOut), 
-        
-        // --- Bridge from Main Core ---
         .FlushD(FlushD),
         .FlushE(FlushE),
         .Int_SrcAE(Int_SrcAE),
+        .fp_sys_stall_out(fp_sys_stall), // <--- CHANGED: FPU Outputs stall
         
-        // --- Bridge to Main Core ---
         .FP_ReqIntWriteW(fp_ReqIntWriteW),
         .FP_IntDataW(fp_IntDataW),
         .FP_IntRdW(fp_IntRdW),
-        .fp_lwstall(fp_lwstall), // Connect the load-use stall signal to the CPU
+        .fp_lwstall(fp_lwstall), 
         .FP_MemWriteM(fp_MemWriteM),
         .FP_MemWriteDataM(fp_MemWriteDataM),
-        
-        // --- Direct from Data Memory ---
-        .MemReadDataW(ReadDataM) // FP loads tap directly from Data RAM output
+        .MemReadDataW(ReadDataM) 
     );
 
-
-
-    // Instruction Memory (BRAM Style)
-    bram_imem imem (
-        .clk(clk),
-        .addr(PCF),
-        .dout(ImemOut),
-        .en(iMemEnF) // Enable signal from CPU
-    );
-
-    // Data Memory (BRAM Style)
-    bram_dmem dmem (
-        .clk(clk),
-        .en(MemEnM),
-        .we(MemWriteM),
-        .addr(ALUResultM),
-        .din(WriteDataM),
-        .dout(ReadDataM)
-    );
+    bram_imem imem (.clk(clk), .addr(PCF), .dout(ImemOut), .en(iMemEnF));
+    bram_dmem dmem (.clk(clk), .en(MemEnM), .we(MemWriteM), .addr(ALUResultM), .din(WriteDataM), .dout(ReadDataM));
 
 endmodule

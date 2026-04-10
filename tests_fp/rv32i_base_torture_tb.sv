@@ -2,14 +2,27 @@
 `include "../src/pipeline.v"
 `include "../src/alu.v"
 `include "../src/controller.v"
-`include "../src/data_mem_dummy.v" // Assuming you fixed the BRAM initialization
+`include "../src/data_mem_dummy.v" 
 `include "../src/instr_mem.v"
 `include "../src/regfile.v"
 `include "../src/extend.v"
-`include "../src/hazard_unit.v"
 `include "../src/mem_extend.v"
+
+`include "../src_fp/int_hazard_unit.v"
+
 `include "../src_fp/riscv_fp.v"
 `include "../src_fp/top_fp.v"
+`include "../src_fp/fp_datapath.v"      // Include new FP files
+`include "../src_fp/fp_hazard_unit.v"
+`include "../src_fp/fp_controller.v"
+`include "../src_fp/fp_regfile.v"
+`include "../src_fp/fpu.v"
+`include "../src_fp/fp_mac.v"
+`include "../src_fp/fp_mult.v"
+`include "../src_fp/fp_adder.v"
+`include "../src_fp/fp_sign_inj.v"
+`include "../src_fp/fp_convert.v"
+`include "../src_fp/fp_compare.v"
 
 module tb_step_by_step();
     reg clk, reset;
@@ -95,8 +108,8 @@ module tb_step_by_step();
         dut.imem.ram[24] = 32'h00100F13; 
 
         // Run
-        clk = 0; reset = 1; write_cnt = 0;
-        #25 reset = 0;
+        clk = 0; reset = 0; write_cnt = 0;
+        #25 reset = 1;
 
         $display("==================================================================================");
         $display("                       THE PIPELINE TORTURE TEST");
@@ -109,7 +122,7 @@ module tb_step_by_step();
     // MONITOR: Synced to Writeback Stage
     // ====================================================================
     always @(negedge clk) begin
-        if (dut.cpu.RegWriteW && !reset && dut.cpu.rf.a3 != 0) begin
+        if (dut.cpu.RegWriteW && reset && dut.cpu.rf.a3 != 0) begin
             write_cnt = write_cnt + 1;
             
             // TRAP LOGIC

@@ -95,8 +95,8 @@ module tb_step_by_step();
         dut.imem.ram[24] = 32'h00100F13; 
 
         // Run
-        clk = 0; reset = 1; write_cnt = 0;
-        #25 reset = 0;
+        clk = 0; reset = 0; write_cnt = 0;
+        #25 reset = 1;
 
         $display("==================================================================================");
         $display("                       THE PIPELINE TORTURE TEST");
@@ -109,7 +109,7 @@ module tb_step_by_step();
     // MONITOR: Synced to Writeback Stage
     // ====================================================================
     always @(negedge clk) begin
-        if (dut.cpu.RegWriteW && !reset && dut.cpu.rf.a3 != 0) begin
+        if (dut.cpu.RegWriteW && reset && dut.cpu.rf.a3 != 0) begin
             write_cnt = write_cnt + 1;
             
             // TRAP LOGIC

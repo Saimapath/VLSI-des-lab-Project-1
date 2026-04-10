@@ -2,14 +2,28 @@
 `include "../src/pipeline.v"
 `include "../src/alu.v"
 `include "../src/controller.v"
-`include "../src/data_mem_dummy.v"
+`include "../src/data_mem_dummy.v" 
 `include "../src/instr_mem.v"
 `include "../src/regfile.v"
 `include "../src/extend.v"
-`include "../src/hazard_unit.v"
 `include "../src/mem_extend.v"
+
+`include "../src_fp/int_hazard_unit.v"
+
 `include "../src_fp/riscv_fp.v"
 `include "../src_fp/top_fp.v"
+`include "../src_fp/fp_datapath.v"      // Include new FP files
+`include "../src_fp/fp_hazard_unit.v"
+`include "../src_fp/fp_controller.v"
+`include "../src_fp/fp_regfile.v"
+`include "../src_fp/fpu.v"
+`include "../src_fp/fp_mac.v"
+`include "../src_fp/fp_mult.v"
+`include "../src_fp/fp_adder.v"
+`include "../src_fp/fp_sign_inj.v"
+`include "../src_fp/fp_convert.v"
+`include "../src_fp/fp_compare.v"
+
 
 module tb_step_by_step();
     reg clk, reset;
@@ -77,7 +91,7 @@ module tb_step_by_step();
         // 30: sub x7, x7, x2 (Funct7 for SUB is 0100000)
         dut.imem.ram[12] = {7'b0100000, 5'd2, 5'd7, 3'b000, 5'd7, 7'b0110011}; 
         
-        // 34: sw x7, 84(x3) (Offset = 84. imm[11:5]=2, imm[4:0]=20)
+        // 34: sw x7, 84(x3) (Offset = 84. imm[11:5]=2, imm[4:0]=20) 
         dut.imem.ram[13] = {7'd2, 5'd7, 5'd3, 3'b010, 5'd20, 7'b0100011}; 
         
         // 38: lw x2, 96(x0)
@@ -137,8 +151,8 @@ module tb_step_by_step();
 
 
         // Run
-        clk = 0; reset = 1; write_cnt = 0;
-        #25 reset = 0;
+        clk = 0; reset = 0; write_cnt = 0;
+        #25 reset = 1;
 
         $display("----------------------------------------------------------------------------------");
         $display("   RISC-V FULL INSTRUCTION VERIFICATION");
@@ -151,7 +165,7 @@ module tb_step_by_step();
     // MONITOR: Checks execution whenever Register File is written
     // ====================================================================
     always @(negedge clk) begin
-        if (dut.cpu.RegWriteW && !reset && dut.cpu.rf.a3 != 0) begin
+        if (dut.cpu.RegWriteW && reset && dut.cpu.rf.a3 != 0) begin
             write_cnt = write_cnt + 1;
             
             // TRAP LOGIC: x30 is reserved for testing branch failures or success

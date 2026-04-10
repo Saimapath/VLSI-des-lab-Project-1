@@ -1,6 +1,6 @@
 module bram_imem (
     input clk,
-    input [31:0] addr,
+    input [29:0] addr,
     input en,
     output reg [31:0] dout
 );
@@ -45,7 +45,7 @@ module bram_imem (
     // end
 
     always @(posedge clk) begin
-        if (en) dout <= ram[addr[31:2]]; // Word aligned access
+        if (en) dout <= ram[addr[29:0]]; // Word aligned access
     end
        
 endmodule

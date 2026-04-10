@@ -137,8 +137,8 @@ module tb_step_by_step();
 
 
         // Run
-        clk = 0; reset = 1; write_cnt = 0;
-        #25 reset = 0;
+        clk = 0; reset = 0; write_cnt = 0;
+        #25 reset = 1;
 
         $display("----------------------------------------------------------------------------------");
         $display("   RISC-V FULL INSTRUCTION VERIFICATION");
@@ -151,7 +151,7 @@ module tb_step_by_step();
     // MONITOR: Checks execution whenever Register File is written
     // ====================================================================
     always @(negedge clk) begin
-        if (dut.cpu.RegWriteW && !reset && dut.cpu.rf.a3 != 0) begin
+        if (dut.cpu.RegWriteW && reset && dut.cpu.rf.a3 != 0) begin
             write_cnt = write_cnt + 1;
             
             // TRAP LOGIC: x30 is reserved for testing branch failures or success

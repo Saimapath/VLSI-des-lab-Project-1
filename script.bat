@@ -7,6 +7,8 @@ set TEST_DIR=.\tests
 set TEST_DIR_FP=.\tests_fp
 set SIM_DIR=.\sim
 set SRC_DIR_FP=.\src_fp
+set SRC_DIR_SYSTOLIC=.\src_systolic_array
+set TEST_DIR_SYSTOLIC=.\tests_systolic_array
 
 :: Create sim directory if it doesn't exist
 if not exist %SIM_DIR% mkdir %SIM_DIR%
@@ -24,6 +26,13 @@ echo 5) Test Full SoC (Top Level)
 echo 6) Torture Test for rv32i
 echo 7) Test FP MAC Unit
 echo 8) Test Full FPU
+echo 9) Test rv32i Base Instructions with FP
+echo 10) Torture Test for rv32i with FP
+echo 11) Test FP SoC (Top Level with FP)
+echo 12) Test MAC for Systolic Array
+echo 13) Test Systolic Array
+
+
 
 echo q) Quit
 echo ------------------------------------------------
@@ -56,12 +65,18 @@ if "%choice%"=="1" (
 ) else if "%choice%"=="9" (
     set MODULE=riscv_fp
     set TB_FILE=%TEST_DIR_FP%\rv32i_base_instr.sv
-    ) else if "%choice%"=="10" (
+) else if "%choice%"=="10" (
     set MODULE=riscv_fp_torture
     set TB_FILE=%TEST_DIR_FP%\rv32i_base_torture_tb.sv
-    ) else if "%choice%"=="11" (
+) else if "%choice%"=="11" (
     set MODULE=riscv_fp_tsoc
     set TB_FILE=%TEST_DIR_FP%\fp_soc_tb.sv
+) else if "%choice%"=="12" (
+    set MODULE=mac_for_SA
+    set TB_FILE=%TEST_DIR_SYSTOLIC%\MAC_tb.v
+) else if "%choice%"=="13" (
+    set MODULE=systolic_array
+    set TB_FILE=%TEST_DIR_SYSTOLIC%\matmul_tb.v
 ) else if "%choice%"=="q" (
     exit /b
 ) else (

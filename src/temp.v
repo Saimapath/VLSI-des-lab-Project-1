@@ -6,7 +6,24 @@ module riscv_pipelined(
     output [29:0] ALUResultM_out, 
     output [31:0] WriteDataM,
     output        MemEnM, iMemEnF,
-    input  [31:0] ReadDataM
+    input  [31:0] ReadDataM,
+
+    // ===================================================================
+    // ---> FP DATAPATH: Outputs TO the FP module
+    // ===================================================================
+    output        FlushD_out,     // Tell FP to flush Decode stage
+    output        FlushE_out,     // Tell FP to flush Execute stage
+    output [31:0] Int_SrcAE_out,  // Pass resolved integer RS1 to FP Execute
+    
+    // ===================================================================
+    // ---> FP DATAPATH: Inputs FROM the FP module
+    // ===================================================================
+    input         FP_ReqIntWriteW,  
+    input  [31:0] FP_IntDataW,      
+    input  [4:0]  FP_IntRdW,        
+    input         FP_MemWriteM,     
+    input  [31:0] FP_MemWriteDataM,
+    input         fp_lwstall        
 );
 
     // =========================================================================
@@ -38,35 +55,45 @@ module riscv_pipelined(
     wire [1:0]  ResultSrcE;
     wire        RegWriteE, JumpE, JalrE, BranchE, zero_for_takenE, ALUSrcE;
     wire        ZeroE, PCSrcE, MemEnE, upimmE, validE;
-    wire        FlushE;
-(* keep = "true" *) wire ActualFlushE;
-        wire        is_eq, is_lt, is_ltu;
+    wire        FlushE, ActualFlushE;
+    wire        is_eq, is_lt, is_ltu;
     reg         FastZeroE, BranchFlushDelay;
 
     // --- Memory Stage ---
     wire [31:0] PCM, ALUResultM, PCPlus4M, UpimmM;
+    wire [31:0] IntWriteDataM; 
     wire [4:0]  RdM;
     wire [2:0]  LoadBitsM;
     wire [1:0]  ResultSrcM;
     wire        RegWriteM, validM;
 
     // --- Writeback Stage ---
-    wire [31:0] PCW, ALUResultW, ReadDataW, ReadDataW_ext, PCPlus4W, ResultW, UpimmW;
-    wire [4:0]  RdW;
+    wire [31:0] PCW, ALUResultW, ReadDataW, ReadDataW_ext, PCPlus4W, UpimmW;
+    wire [31:0] IntResultW, Final_ResultW;
+    wire [4:0]  RdW, Final_RdW;
     wire [2:0]  LoadBitsW;
     wire [1:0]  ResultSrcW;
-    wire        RegWriteW, RegWriteW_1, validW;
+    wire        RegWriteW, RegWriteW_1, validW, Final_RegWriteW;
+
+
+    // =========================================================================
+    //                    FP INTERFACE ASSIGNMENTS
+    // =========================================================================
+    
+    // Pass the hazard flush signals to the FP pipeline
+    assign FlushD_out    = FlushD; 
+    assign FlushE_out    = ActualFlushE; // Use ActualFlushE to respect the decoupled branch fix!
+    assign Int_SrcAE_out = SrcAE;
+
+    assign PCF_out        = PCF[31:2];
+    assign ALUResultM_out = ALUResultM[31:2];
 
 
     // =========================================================================
     //                              FETCH STAGE
     // =========================================================================
 
-    assign PCF_out  = PCF[31:2];
-    // assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
-
-        (* keep = "true" *) wire PCSrcE_pc = PCSrcE;
-    assign PCNext   = PCSrcE_pc ? PCTargetE : PCPlus4F;
+    assign PCNext   = PCSrcE ? PCTargetE : PCPlus4F;
     assign PCPlus4F = PCF + 4;
     assign validF   = !StallF;
     assign iMemEnF  = !StallF; 
@@ -109,7 +136,12 @@ module riscv_pipelined(
         .MemEn(MemEnD)
     );
     
-    regfile rf(clk, RegWriteW, Rs1D, Rs2D, RdW, ResultW, RD1D, RD2D);
+    // --- FP Override: Allow FP unit to write to Integer RegFile ---
+    assign Final_RegWriteW = RegWriteW | FP_ReqIntWriteW;
+    assign Final_RdW       = FP_ReqIntWriteW ? FP_IntRdW   : RdW;
+    assign Final_ResultW   = FP_ReqIntWriteW ? FP_IntDataW : IntResultW;
+
+    regfile rf(clk, Final_RegWriteW, Rs1D, Rs2D, Final_RdW, Final_ResultW, RD1D, RD2D);
     extend ext(InstrD[31:7], ImmSrcD, ImmExtD);
 
     assign validD = FlushE ? 1'b0 : validD_1;
@@ -121,13 +153,14 @@ module riscv_pipelined(
     assign ForwardResultM = (ResultSrcM == 2'b00) ? ALUResultM : 
                             (ResultSrcM == 2'b10) ? PCPlus4M : UpimmM;
 
+    // Note: Forwarding from WB uses Final_ResultW so it grabs FP data if applicable!
     assign SrcAD = (ForwardAD == 2'b11) ? ForwardResultE :
                    (ForwardAD == 2'b10) ? ForwardResultM : 
-                   (ForwardAD == 2'b01) ? ResultW : RD1D;
+                   (ForwardAD == 2'b01) ? Final_ResultW : RD1D;
 
     assign WriteDataD = (ForwardBD == 2'b11) ? ForwardResultE :
                         (ForwardBD == 2'b10) ? ForwardResultM : 
-                        (ForwardBD == 2'b01) ? ResultW : RD2D;
+                        (ForwardBD == 2'b01) ? Final_ResultW : RD2D;
 
     // --- D/E Pipeline Registers ---
     pipe_reg #(160) d_e_data(clk, reset, 1'b1, 1'b0, 
@@ -154,25 +187,11 @@ module riscv_pipelined(
     // =========================================================================
 
     // --- The Fetch Decoupler ---
-    // always @(posedge clk or posedge reset) begin
-    //     if (reset) BranchFlushDelay <= 1'b0;
-    //     else       BranchFlushDelay <= PCSrcE;
-    // end
-    // assign ActualFlushE = FlushE || BranchFlushDelay;
-
-// --- The Fetch Decoupler ---
     always @(posedge clk or negedge reset) begin
         if (!reset) BranchFlushDelay <= 1'b0;
         else       BranchFlushDelay <= PCSrcE;
     end
-    
-    // Compute the base flush signal
-    wire base_ActualFlushE = FlushE || BranchFlushDelay;
-    
-    // Force Vivado to physically duplicate the flush wires
-    assign ActualFlushE    = base_ActualFlushE; // dedicated to Int registers
-    (* keep = "true" *) wire ActualFlushE_fp = base_ActualFlushE; // dedicated to FP registers
-
+    assign ActualFlushE = FlushE || BranchFlushDelay;
 
     // --- ALU Math & Execution ---
     assign SrcAE      = RD1E;
@@ -202,7 +221,10 @@ module riscv_pipelined(
     // --- E/M Pipeline Registers ---
     pipe_reg #(32) e_m_pc(clk, reset, 1'b1, 1'b0, PCE, PCM);
     pipe_reg #(32) e_m_alu(clk, reset, 1'b1, 1'b0, ALUResultE, ALUResultM);
-    pipe_reg #(32) e_m_wd(clk, reset, 1'b1, 1'b0, WriteDataE, WriteDataM);
+    
+    // Store Execute data into the Internal Write Data register
+    pipe_reg #(32) e_m_wd(clk, reset, 1'b1, 1'b0, WriteDataE, IntWriteDataM);
+    
     pipe_reg #(5)  e_m_rd(clk, reset, 1'b1, 1'b0, RdE, RdM);
     pipe_reg #(32) e_m_upimm(clk, reset, 1'b1, 1'b0, UpimmE, UpimmM);
     pipe_reg #(32) e_m_pc4(clk, reset, 1'b1, 1'b0, PCPlus4E, PCPlus4M);
@@ -219,7 +241,8 @@ module riscv_pipelined(
     //                              MEMORY STAGE
     // =========================================================================
 
-    assign ALUResultM_out = ALUResultM[31:2];
+    // --- FP Override: Multiplex Data going to Data Memory (Int vs Float) ---
+    assign WriteDataM = FP_MemWriteM ? FP_MemWriteDataM : IntWriteDataM;
 
     // --- M/W Pipeline Registers ---
     pipe_reg #(32) m_w_pc(clk, reset, 1'b1, 1'b0, PCM, PCW);
@@ -243,10 +266,10 @@ module riscv_pipelined(
     
     assign RegWriteW = RegWriteW_1 && validW; 
     
-    assign ResultW = (ResultSrcW == 2'b00) ? ALUResultW :
-                     (ResultSrcW == 2'b01) ? ReadDataW_ext :
-                     (ResultSrcW == 2'b10) ? PCPlus4W :
-                     UpimmW; 
+    assign IntResultW = (ResultSrcW == 2'b00) ? ALUResultW :
+                        (ResultSrcW == 2'b01) ? ReadDataW_ext :
+                        (ResultSrcW == 2'b10) ? PCPlus4W :
+                        UpimmW; 
 
 
     // =========================================================================
@@ -256,8 +279,10 @@ module riscv_pipelined(
     hazard_unit hu( 
         .rs1d(Rs1D), .rs2d(Rs2D), 
         .rs1e(Rs1E), .rs2e(Rs2E), 
-        .rde(RdE),   .rdm(RdM),   .rdw(RdW), 
-        .regwritee(RegWriteE), .regwritem(RegWriteM), .regwritew(RegWriteW), 
+        .rde(RdE),   .rdm(RdM),   
+        .rdw(Final_RdW),                               // Use Final_RdW (Accounts for FP writes)
+        .regwritee(RegWriteE), .regwritem(RegWriteM), 
+        .regwritew(Final_RegWriteW),                   // Use Final_RegWriteW (Accounts for FP writes)
         .resultsrce(ResultSrcE), .resultsrcm(ResultSrcM),
         .pcsrc_e(PCSrcE), 
         .valide(validE), .validm(validM), .validw(validW), 
@@ -266,7 +291,8 @@ module riscv_pipelined(
         .stalld_pc(StallD_pc), 
         .stalld_pc4(StallD_pc4), 
         .flushe(FlushE), 
-        .flushd(FlushD)
+        .flushd(FlushD),
+        .fp_lwstall(fp_lwstall)                        // Hook up FP load-use stall!
     );
 
 endmodule

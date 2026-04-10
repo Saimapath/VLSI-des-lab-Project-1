@@ -5,7 +5,7 @@ module fp_regfile (
     input  [15:0] wd4,
     output [15:0] rd1, rd2,rd3
 );
-    reg [15:0] rf [15:1];
+    reg [15:0] rf [31:1];
 
     always @(posedge clk) begin
         if (we4 && (a4 != 5'b0))

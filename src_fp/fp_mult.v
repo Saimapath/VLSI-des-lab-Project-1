@@ -1,12 +1,14 @@
 module fp16_multiplier (
+    input  wire        clk,     // ---> ADDED CLOCK
+    input  wire        rst_n,   // ---> ADDED RESET
     input  wire [15:0] a,
     input  wire [15:0] b,
-    input  wire [2:0]  rm,      // Rounding Mode (from CSR)
+    input  wire [2:0]  rm,      
     output wire [15:0] result
 );
 
     // =======================================================================
-    // STAGE 1: UNPACK & HANDLE ZEROES
+    // STAGE 1: UNPACK & MULTIPLY (Combinational)
     // =======================================================================
     wire a_sign = a[15];
     wire b_sign = b[15];
@@ -15,45 +17,61 @@ module fp16_multiplier (
     
     wire a_is_zero = (a_exp == 5'd0);
     wire b_is_zero = (b_exp == 5'd0);
-    wire result_is_zero = a_is_zero | b_is_zero;
+    wire next_result_is_zero = a_is_zero | b_is_zero;
 
     wire [10:0] a_mant = a_is_zero ? 11'd0 : {1'b1, a[9:0]};
     wire [10:0] b_mant = b_is_zero ? 11'd0 : {1'b1, b[9:0]};
-    wire o_sign = a_sign ^ b_sign;
+    wire next_o_sign = a_sign ^ b_sign;
+
+    // The raw math
+    wire [21:0] next_raw_product = a_mant * b_mant; 
+    wire signed [6:0] next_raw_exp = {2'b00, a_exp} + {2'b00, b_exp} - 7'sd15;
 
     // =======================================================================
-    // STAGE 2: MULTIPLY & ADD EXPONENTS
+    // INTERNAL PIPELINE REGISTER (Forces Vivado to use DSP48 Registers!)
     // =======================================================================
-    // 11-bit x 11-bit multiplication yields a 22-bit product
-    wire [21:0] raw_product = a_mant * b_mant; 
-    
-    // Exponent math happens in parallel with multiplication
-    wire signed [6:0] raw_exp = {2'b00, a_exp} + {2'b00, b_exp} - 7'sd15;
+    reg [21:0] raw_product;
+    reg signed [6:0] raw_exp;
+    reg o_sign;
+    reg result_is_zero;
+    reg [2:0] rm_reg;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            raw_product    <= 22'd0;
+            raw_exp        <= 7'sd0;
+            o_sign         <= 1'b0;
+            result_is_zero <= 1'b0;
+            rm_reg         <= 3'd0;
+        end else begin
+            raw_product    <= next_raw_product; // LATCHED!
+            raw_exp        <= next_raw_exp;
+            o_sign         <= next_o_sign;
+            result_is_zero <= next_result_is_zero;
+            rm_reg         <= rm;
+        end
+    end
 
     // =======================================================================
-    // STAGE 3: NORMALIZE (Flattened Muxing & Sticky Reuse)
+    // STAGE 2: NORMALIZE & ROUND (Uses the Latched Data)
     // =======================================================================
-    wire is_norm = raw_product[21]; // Do we need to shift right?
+    wire is_norm = raw_product[21]; 
 
-    // Flattened multiplexers for independent, parallel LUT mapping
     wire [9:0] norm_frac = is_norm ? raw_product[20:11] : raw_product[19:10];
     wire G = is_norm ? raw_product[10] : raw_product[9];
     wire R = is_norm ? raw_product[9]  : raw_product[8];
 
-    // Sticky bit reuse: calculate the bottom 8 bits once!
     wire S_base = |raw_product[7:0];
     wire S = is_norm ? (S_base | raw_product[8]) : S_base;
 
     wire signed [6:0] norm_exp = raw_exp + {6'd0, is_norm};
 
-    // =======================================================================
-    // STAGE 4: ROUNDING
-    // =======================================================================
+    // --- Rounding ---
     wire L = norm_frac[0];
     reg round_up;
 
     always @(*) begin
-        case (rm)
+        case (rm_reg) // Use registered rounding mode!
             3'b000: round_up = (G & (R | S)) | (G & ~R & ~S & L); // RNE
             3'b001: round_up = 1'b0; // RTZ
             3'b010: round_up = o_sign & (G | R | S); // RDN
@@ -66,12 +84,9 @@ module fp16_multiplier (
     wire [10:0] rounded_frac = {1'b0, norm_frac} + round_up;
     wire post_round_overflow = rounded_frac[10];
 
-    // =======================================================================
-    // STAGE 5: PARALLEL EXCEPTION HANDLING
-    // =======================================================================
+    // --- Exception Handling ---
     wire signed [6:0] final_exp_calc = norm_exp + {6'd0, post_round_overflow};
 
-    // Calculate exception flags independently to reduce logic depth
     wire is_underflow = result_is_zero || (norm_exp <= 7'sd0);
     wire is_overflow  = (!is_underflow) && (final_exp_calc >= 7'sd31);
 

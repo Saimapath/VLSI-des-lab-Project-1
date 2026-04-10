@@ -36,7 +36,7 @@ module fpu (
     // ==========================================
     // 1. MAC UNIT (Handles FMA, FADD, FSUB, FMUL)
     // ==========================================
-    wire [15:0] mac_result;
+    wire [15:0] mac_result, mac_mul_result;
     
     // For FNMADD and FNMSUB, we mathematically negate A: -(A * B) == (-A * B)
     wire negate_a = (fpucontrol == FPU_FNMSUB) || (fpucontrol == FPU_FNMADD);
@@ -59,6 +59,8 @@ module fpu (
         .a(mac_a), .b(mac_b), .c(mac_c),
         .add_sub(mac_add_sub), 
         .rm(rm),
+
+        .mul_result(mac_mul_result),
         .result(mac_result)
     );
 
@@ -124,8 +126,14 @@ module fpu (
         (fpucontrol == FPU_FMV_W_X)   ? rs1_int[15:0] :
         (fpucontrol == FPU_FDIV || 
          fpucontrol == FPU_FSQRT)     ? 16'hFFFF : // TBD: Div/Sqrt Not Implemented Yet
-        mac_result; // Default to MAC pipelined output (FMADD, FADD, FMUL, etc.)
-
+         (fpucontrol == FPU_FMADD || 
+          fpucontrol == FPU_FMSUB || 
+          fpucontrol == FPU_FNMSUB || 
+          fpucontrol == FPU_FNMADD || 
+          fpucontrol == FPU_FADD || 
+          fpucontrol == FPU_FSUB)    ? mac_result :
+          (fpucontrol == FPU_FMUL)    ? mac_result :
+         16'h0; // Default case
 
     // --- Data bound for Integer Register File (rd) ---
     // RISC-V Zfh Extension standard: fmv.x.h sign-extends the 16-bit float into the 32-bit register

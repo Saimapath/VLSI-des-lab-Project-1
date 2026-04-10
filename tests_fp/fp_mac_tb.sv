@@ -101,7 +101,7 @@ module fp_mac_tb();
         // Wait for Cycle 1 to propagate (2 clock cycles latency)
         @(posedge clk); // Cycle 1 (Mult finishes)
         @(posedge clk); // Cycle 2 (Add finishes)
-        
+        @(posedge clk); @(posedge clk); @(posedge clk); 
         // On the next edges, the results will pour out one after the other!
         // @(posedge clk);
         #1; // 1ns delay to ensure waveform signals have settled for printing
