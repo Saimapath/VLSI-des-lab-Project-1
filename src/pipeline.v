@@ -1,12 +1,23 @@
-// Generic Pipeline Register Template
-module pipe_reg #(parameter WIDTH = 32) (
-    input clk, reset, en, clr,
-    input  [WIDTH-1:0] d,
+// =====================================================================
+// HIGH-SPEED PIPELINE REGISTER (Forces Hardware Control Pins)
+// =====================================================================
+module pipe_reg #(parameter WIDTH = 8) (
+    input wire clk, 
+    input wire reset, 
+    input wire en, 
+    input wire clear,
+    input wire [WIDTH-1:0] d,
     output reg [WIDTH-1:0] q
 );
-    always @(posedge clk or negedge reset)
-        if (!reset)      q <= 0;
-        else if (clr)   q <= 0;
-        else if (en)    q <= d;
-        // else q <= d;
+    // Xilinx Pragma: Forces Vivado to bypass the combinational D-LUTs 
+    // and wire directly into the silicon's dedicated Set/Reset and Enable pins!
+    (* direct_reset = "true" *)  wire hw_clear = (!reset || clear);
+    (* direct_enable = "true" *) wire hw_en = en;
+
+    always @(posedge clk) begin
+        if (hw_clear) 
+            q <= 0;
+        else if (hw_en) 
+            q <= d;
+    end
 endmodule

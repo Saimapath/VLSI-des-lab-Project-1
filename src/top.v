@@ -3,7 +3,8 @@ module riscv_soc(
     input reset
 );
     // Interconnect wires
-    wire [31:0] PCF, ImemOut, ALUResultM, WriteDataM, ReadDataM;
+    wire [31:0]  ImemOut,  WriteDataM, ReadDataM;
+    wire [29:0] ALUResultM, PCF; // Added for direct connection to Data Memory
     wire [3:0]  MemWriteM;
     wire        MemEnM;
     wire       iMemEnF;
@@ -12,12 +13,12 @@ module riscv_soc(
     riscv_pipelined cpu (
         .clk(clk),
         .reset(reset),
-        .PCF(PCF),
+        .PCF_out(PCF),
         .ImemOut(ImemOut),
         .MemWriteM(MemWriteM),
         .iMemEnF(iMemEnF),
         .MemEnM(MemEnM),
-        .ALUResultM(ALUResultM),
+        .ALUResultM_out(ALUResultM),
         .WriteDataM(WriteDataM),
         .ReadDataM(ReadDataM)
     );
