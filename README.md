@@ -3,5 +3,5 @@
 
 [Notes_260308_211807 (1)_compressed.pdf](https://github.com/user-attachments/files/25935716/Notes_260308_211807.1._compressed.pdf)
 
-rv32i- base isa (40 instructions) implementation is done, and stored in src/ folder
-check script to run differnt testbenches, for now only alu and rf verified
+Download the project folder -> run the script.bat file (Windows) -> choose your test to run.
+You can add more testbenches in their respective folders and modify the script to run iverilog.
